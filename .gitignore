@@ -38,3 +38,9 @@ docs
 CLAUDE.md
 .claude
 .env
+
+# Python (server/)
+__pycache__/
+*.py[cod]
+.venv
+*.egg-info/
