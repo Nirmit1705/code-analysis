@@ -38,6 +38,7 @@ docs
 CLAUDE.md
 .claude
 .env
+.env.local
 
 # Python (server/)
 __pycache__/

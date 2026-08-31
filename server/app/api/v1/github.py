@@ -6,6 +6,7 @@ Phase 2.4 endpoints on `repos_router` below, in this same file per the plan.
 """
 
 import uuid
+from datetime import timedelta
 from urllib.parse import urlencode
 
 import jwt
@@ -25,7 +26,8 @@ from app.core.security import (
 from app.models.branch import Branch
 from app.models.repository import Repository
 from app.models.user import User
-from app.schemas.github import GitHubInstallResponse
+from app.schemas.auth import TokenResponse
+from app.schemas.github import GitHubExchangeRequest, GitHubInstallResponse
 from app.schemas.repository import BranchRead, GitHubRepoSummary, RepoSelectRequest, RepositoryRead
 from app.services import github_service, repo_service
 from app.services.auth_service import get_user_by_email
@@ -40,6 +42,12 @@ router = APIRouter(prefix="/auth/github", tags=["github"])
 # Distinguishes the install `state` param from a real access/refresh token
 # when decoded — see create_action_token's docstring.
 STATE_TOKEN_TYPE = "github_install_state"
+
+# Phase 2.5: distinguishes the callback's one-time exchange code from a real
+# access/refresh token, and is deliberately short-lived (60s — just long
+# enough for the browser to load `/onboarding` and fire the exchange call).
+EXCHANGE_TOKEN_TYPE = "github_callback_exchange"
+EXCHANGE_TOKEN_TTL = timedelta(seconds=60)
 
 
 @router.get("/install", response_model=GitHubInstallResponse)
@@ -73,9 +81,10 @@ def github_callback(
     install. Unlike `/install`, this is a genuine top-level navigation
     initiated by GitHub itself, so it can't carry an Authorization header —
     the `state` param minted by `/install` is what ties this request back to
-    the user who started the flow. On success, a fresh access/refresh token
-    pair is handed to the frontend via redirect so it can re-establish its
-    session after the round trip through github.com.
+    the user who started the flow. On success, the frontend is handed a
+    short-lived one-time `exchange_code` (not raw tokens — see
+    `EXCHANGE_TOKEN_TYPE`'s docstring) which it immediately trades for a
+    real access/refresh pair via `POST /auth/github/exchange`.
     """
     settings = get_settings()
     error_url = f"{settings.FRONTEND_URL}/onboarding?github_error=1"
@@ -103,13 +112,44 @@ def github_callback(
     except GitHubAuthError:
         return RedirectResponse(error_url, status_code=302)
 
-    success_params = {
-        "installation_id": installation_id,
-        "access_token": create_access_token(subject=user.email),
-        "refresh_token": create_refresh_token(subject=user.email),
-    }
+    exchange_code = create_action_token(user.email, EXCHANGE_TOKEN_TYPE, EXCHANGE_TOKEN_TTL)
+    success_params = {"installation_id": installation_id, "exchange_code": exchange_code}
     success_url = f"{settings.FRONTEND_URL}/onboarding?" + urlencode(success_params)
     return RedirectResponse(success_url, status_code=302)
+
+
+@router.post("/exchange", response_model=TokenResponse)
+def github_exchange(payload: GitHubExchangeRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """Trades the callback's one-time `exchange_code` for a real
+    access/refresh token pair, returned in the JSON response body — never in
+    a URL. Replaces the Phase 2.3 approach of putting raw JWTs directly in
+    the `/callback` redirect's query string (browser history + any
+    server/proxy access logs between github.com's redirect and the browser
+    would otherwise carry live tokens for as long as they're valid, the
+    refresh token especially since it's long-lived).
+
+    Not enforced as strictly single-use (no server-side redemption tracking
+    — would need a store, and Redis isn't wired into the app yet outside
+    Celery's Phase 5 config) — mitigated by the 60s expiry on
+    `EXCHANGE_TOKEN_TYPE` tokens instead, an explicit MVP simplification in
+    the same spirit as the debt-detection heuristics elsewhere in this
+    codebase. Revisit once Redis is wired in for Phase 5.
+    """
+    try:
+        decoded = decode_token(payload.code)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
+    if decoded.get("type") != EXCHANGE_TOKEN_TYPE or not decoded.get("sub"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
+
+    user = get_user_by_email(db, decoded["sub"])
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
+
+    return TokenResponse(
+        access_token=create_access_token(subject=user.email),
+        refresh_token=create_refresh_token(subject=user.email),
+    )
 
 
 # --- Phase 2.4: repository & branch APIs -----------------------------------
