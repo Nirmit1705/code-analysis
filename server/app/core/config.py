@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # CORS
     CORS_ALLOWED_ORIGINS: str = "http://localhost:8080"
 
+    # Development — where GitHub-connect redirects (install/callback) send the browser back to.
+    FRONTEND_URL: str = "http://localhost:8080"
+
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ALLOWED_ORIGINS.split(",") if origin.strip()]
