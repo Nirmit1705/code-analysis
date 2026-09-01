@@ -23,7 +23,10 @@ from app.core.config import get_settings
 GITHUB_API_BASE = "https://api.github.com"
 GITHUB_API_VERSION = "2022-11-28"
 REQUEST_TIMEOUT = 15.0
+ARCHIVE_DOWNLOAD_TIMEOUT = 120.0  # tarball downloads run far longer than a metadata call
+ARCHIVE_CHUNK_SIZE = 1024 * 1024
 APP_JWT_TTL_SECONDS = 9 * 60  # GitHub caps App JWTs at 10 minutes; stay under it.
+REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 # Shared connection pool for the process lifetime, rather than opening a new
 # TCP/TLS connection per call.
@@ -36,6 +39,16 @@ class GitHubServiceError(Exception):
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
         super().__init__(f"GitHub API error ({status_code}): {message}")
+
+
+class GitHubArchiveTooLargeError(Exception):
+    """Raised by `download_repository_archive` when the archive exceeds the
+    caller-supplied byte cap. Checked against actual streamed bytes as they
+    arrive, not a `Content-Length` header (which may be absent or wrong)."""
+
+    def __init__(self, limit_bytes: int):
+        self.limit_bytes = limit_bytes
+        super().__init__(f"repository archive exceeded the {limit_bytes}-byte cap while downloading")
 
 
 @lru_cache
@@ -203,3 +216,68 @@ def get_diff(installation_token: str, owner: str, repo: str, base: str, head: st
     return _request(
         "GET", f"/repos/{owner}/{repo}/compare/{base}...{head}", token=installation_token
     ).json()
+
+
+def download_repository_archive(
+    *,
+    installation_token: str,
+    owner: str,
+    repo: str,
+    ref: str,
+    dest_path: Path,
+    max_bytes: int | None = None,
+) -> int:
+    """Downloads the tarball archive of `repo` at `ref` (a commit SHA, in
+    Phase 3's usage — always an exact commit, never a mutable branch name) to
+    `dest_path`, streamed straight to disk rather than buffered in memory.
+    Used by `analysis/ingestion.py` (Phase 3.1) instead of `git clone`, which
+    would need git configured in the worker and would put credentials in a
+    URL.
+
+    GitHub's tarball endpoint (`GET /repos/{owner}/{repo}/tarball/{ref}`)
+    responds with a redirect to a signed, time-limited codeload.github.com
+    URL. httpx's automatic redirect handling strips the `Authorization`
+    header on a cross-origin redirect — the same protection `requests` has —
+    which would silently break downloads of private repositories, since
+    codeload requires the installation token too. So the redirect is
+    followed manually here, re-attaching the same Authorization header
+    explicitly rather than trusting automatic redirect handling to do it.
+
+    Raises `GitHubServiceError` for a non-2xx/non-redirect API response, and
+    `GitHubArchiveTooLargeError` if `max_bytes` is exceeded — checked against
+    actual streamed bytes, not a declared `Content-Length`.
+
+    Returns the number of bytes written. Leaves nothing behind at
+    `dest_path` if the download fails partway through.
+    """
+    headers = _headers(token=installation_token)
+    redirect_response = _client.get(
+        f"/repos/{owner}/{repo}/tarball/{ref}", headers=headers, follow_redirects=False
+    )
+    if redirect_response.status_code >= 400:
+        raise GitHubServiceError(redirect_response.status_code, redirect_response.text)
+    location = redirect_response.headers.get("location")
+    if redirect_response.status_code not in REDIRECT_STATUS_CODES or not location:
+        raise GitHubServiceError(
+            redirect_response.status_code, "expected a redirect to codeload.github.com"
+        )
+
+    written = 0
+    succeeded = False
+    try:
+        with httpx.stream(
+            "GET", location, headers=headers, timeout=ARCHIVE_DOWNLOAD_TIMEOUT
+        ) as response:
+            if response.status_code >= 400:
+                raise GitHubServiceError(response.status_code, response.read().decode(errors="replace"))
+            with open(dest_path, "wb") as fh:
+                for chunk in response.iter_bytes(chunk_size=ARCHIVE_CHUNK_SIZE):
+                    written += len(chunk)
+                    if max_bytes is not None and written > max_bytes:
+                        raise GitHubArchiveTooLargeError(max_bytes)
+                    fh.write(chunk)
+        succeeded = True
+        return written
+    finally:
+        if not succeeded:
+            dest_path.unlink(missing_ok=True)
