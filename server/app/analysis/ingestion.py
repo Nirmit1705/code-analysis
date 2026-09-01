@@ -26,6 +26,15 @@ from app.services import github_service
 
 logger = logging.getLogger(__name__)
 
+# The three defaults below are resource-safety guards, not product-level
+# limits on repository size — they exist to stop a huge/runaway response, a
+# decompression bomb, or a pathological file count from taking down the
+# ingestion process, not to declare "repos above this size are unsupported".
+# They're deliberately plain function parameters (`ingest_repository`'s
+# `max_archive_bytes` / `max_extracted_bytes` / `max_file_count`) rather than
+# baked-in constants specifically so a caller can override them upward for a
+# legitimate large repository without touching this module.
+
 # Compressed download cap — defense against a huge or runaway response,
 # checked against actual streamed bytes (see `github_service.download_repository_archive`).
 DEFAULT_MAX_ARCHIVE_BYTES = 200 * 1024 * 1024  # 200 MB compressed
