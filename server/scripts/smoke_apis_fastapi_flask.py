@@ -170,12 +170,51 @@ def run_real_spot_check() -> bool:
     return all_passed
 
 
+def run_nested_repo_root_regression_check() -> bool:
+    """Regression check for the cross-file path-resolution bug found
+    during Phase 3.7's real-repo pipeline run: `run_real_spot_check`
+    above ingests these same real files keyed exactly as their absolute
+    imports read (`"app/api/v1/auth.py"`, no prefix), which happened to
+    make `_resolve_module_prefix`'s old exact-match-only lookup work by
+    coincidence. A real ingestion of this actual repo places these files
+    under `server/`, which is *not* the Python package root — before the
+    fix, `router.py`'s `include_router(auth.router)` /
+    `include_router(github.router)` couldn't resolve `auth`/`github` back
+    to their defining files, so `/api/v1` never composed and every route
+    came out unprefixed (`/auth/register` instead of
+    `/api/v1/auth/register`). This reproduces exactly that shape and
+    checks the prefix survives.
+    """
+    print("\n=== Regression: real files ingested under a 'server/' prefix (nested package root) ===")
+    all_passed = True
+
+    rel_paths = ["app/api/v1/auth.py", "app/api/v1/__init__.py", "app/api/v1/github.py", "app/api/v1/router.py"]
+    files = {f"server/{rel}": (SERVER_ROOT / rel).read_bytes() for rel in rel_paths}
+    routes = compose_routes(files)
+    print(f"  {len(routes)} routes extracted: {sorted((r.method, r.path) for r in routes)}")
+
+    expectations = [
+        ("POST", "/api/v1/auth/register"),
+        ("GET", "/api/v1/auth/me"),
+        ("GET", "/api/v1/auth/github/install"),
+        ("GET", "/api/v1/github/repos"),
+        ("POST", "/api/v1/repos/{repository_id}/branches/{branch_name:path}/select"),
+    ]
+    for method, path in expectations:
+        route = _find(routes, method, path)
+        all_passed &= _check(f"nested-root endpoint retains /api/v1 prefix: {method} {path}", route is not None, str(route))
+
+    return all_passed
+
+
 if __name__ == "__main__":
     r1 = run_fastapi_fixture()
     r2 = run_flask_fixture()
     r3 = run_real_spot_check()
+    r4 = run_nested_repo_root_regression_check()
     print("\n=== Summary ===")
-    print(f"FastAPI fixture:  {'PASS' if r1 else 'FAIL'}")
-    print(f"Flask fixture:    {'PASS' if r2 else 'FAIL'}")
-    print(f"real spot-check:  {'PASS' if r3 else 'FAIL'}")
-    sys.exit(0 if (r1 and r2 and r3) else 1)
+    print(f"FastAPI fixture:          {'PASS' if r1 else 'FAIL'}")
+    print(f"Flask fixture:            {'PASS' if r2 else 'FAIL'}")
+    print(f"real spot-check:          {'PASS' if r3 else 'FAIL'}")
+    print(f"nested-root regression:   {'PASS' if r4 else 'FAIL'}")
+    sys.exit(0 if (r1 and r2 and r3 and r4) else 1)

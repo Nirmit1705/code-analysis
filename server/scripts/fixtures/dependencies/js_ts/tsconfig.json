@@ -1,0 +1,9 @@
+{
+  // fixture tsconfig for smoke_dependencies.py's "@/*" alias-resolution check
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

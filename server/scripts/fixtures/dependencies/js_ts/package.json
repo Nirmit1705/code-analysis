@@ -1,0 +1,10 @@
+{
+  "name": "fixture-app",
+  "dependencies": {
+    "react": "^18.3.1",
+    "@scope/pkg": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

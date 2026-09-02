@@ -1,0 +1,6 @@
+fastapi>=0.100.0
+requests==2.31.0
+# a comment line, and a blank line below should both be skipped
+
+-e .
+python-dotenv~=1.0

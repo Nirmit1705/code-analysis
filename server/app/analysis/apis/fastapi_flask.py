@@ -458,9 +458,28 @@ def _resolve_include_target(extractions: dict[str, _FileExtraction]):
 
 
 def _resolve_module_prefix(prefix: str, extractions: dict[str, _FileExtraction]) -> str | None:
+    """Resolves `prefix` (a dotted-import-derived, extension-less POSIX
+    path, e.g. `"app/api/v1"`) to a real file in `extractions` — first by
+    an exact match against the ingested repo root, then — since a Python
+    package's actual import root is often a subdirectory of the ingested
+    repo root (e.g. this repo's own `server/` for its `app.*` absolute
+    imports) — by a suffix match against a path ending in
+    `"/" + candidate`. An ambiguous suffix match (more than one file in
+    the repo happens to end the same way) is treated as unresolved rather
+    than guessed at.
+
+    Same technique as `app.analysis.dependencies.imports._resolve_by_suffix`
+    (Phase 3.7), duplicated here rather than imported so this module's own
+    dependency surface is unchanged — this was a real gap in the original
+    exact-match-only version, only surfaced once Phase 3.7's pipeline
+    ingested this repo's real files at their true root-relative paths."""
     for candidate in (f"{prefix}.py", f"{prefix}/__init__.py"):
         if candidate in extractions:
             return candidate
+        suffix = f"/{candidate}"
+        matches = [key for key in extractions if key.endswith(suffix)]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
