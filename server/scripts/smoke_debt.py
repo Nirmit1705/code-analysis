@@ -43,6 +43,7 @@ Run: `uv run python scripts/smoke_debt.py` (from `server/`).
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -65,7 +66,7 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     return condition
 
 
-def _make_symbol(name: str, file_path: str, module: str, *, has_docstring: bool) -> Symbol:
+def make_symbol(name: str, file_path: str, module: str, *, has_docstring: bool) -> Symbol:
     return Symbol(
         name=name,
         kind=SymbolKind.FUNCTION,
@@ -78,12 +79,28 @@ def _make_symbol(name: str, file_path: str, module: str, *, has_docstring: bool)
     )
 
 
-def run_dirty() -> bool:
-    print("=== dirty fixture — one planted violation per rule ===")
-    all_passed = True
+@dataclass(frozen=True)
+class DebtFixture:
+    """Bundles one `analyze_technical_debt` call's worth of inputs. Pulled
+    out into its own type (rather than inlined directly in `run_dirty`/
+    `run_clean` below) so `scripts/smoke_storage.py` (Phase 4.4) can build
+    a matching `AnalysisResult` from these *exact* already-hand-verified
+    fixture values, instead of inventing a new algorithmic fixture of its
+    own for `persist_analysis_run`'s own debt-issue-persistence check."""
 
+    file_metrics: list[FileMetrics]
+    module_metrics: list[ModuleMetrics]
+    function_complexity: list[FunctionComplexity]
+    symbols: list[Symbol]
+    graph_analysis: GraphAnalysis
+    external_dependencies: list[ExternalDependency]
+
+
+def build_dirty_fixture() -> DebtFixture:
+    """One deliberately-planted violation per rule — see this module's own
+    docstring for the exact planted values/expected tiers."""
     # 1. high complexity -> CRITICAL (>= 30)
-    complex_symbol = _make_symbol(
+    complex_symbol = make_symbol(
         "do_everything", "app/complex_module/big_function.py", "app/complex_module", has_docstring=True
     )
     function_complexity = [FunctionComplexity(symbol=complex_symbol, complexity=35)]
@@ -128,11 +145,11 @@ def run_dirty() -> bool:
     # 6. missing documentation -> MEDIUM (3/5 undocumented = 0.6 ratio, >= 0.5, < 0.75)
     doc_module = "app/doc_module"
     doc_symbols = [
-        _make_symbol("a", "app/doc_module/x.py", doc_module, has_docstring=True),
-        _make_symbol("b", "app/doc_module/x.py", doc_module, has_docstring=False),
-        _make_symbol("c", "app/doc_module/x.py", doc_module, has_docstring=False),
-        _make_symbol("d", "app/doc_module/x.py", doc_module, has_docstring=False),
-        _make_symbol("e", "app/doc_module/x.py", doc_module, has_docstring=True),
+        make_symbol("a", "app/doc_module/x.py", doc_module, has_docstring=True),
+        make_symbol("b", "app/doc_module/x.py", doc_module, has_docstring=False),
+        make_symbol("c", "app/doc_module/x.py", doc_module, has_docstring=False),
+        make_symbol("d", "app/doc_module/x.py", doc_module, has_docstring=False),
+        make_symbol("e", "app/doc_module/x.py", doc_module, has_docstring=True),
     ]
     # complex_symbol's own module ("app/complex_module") has only 1 symbol —
     # below MIN_SYMBOLS_FOR_DOC_CHECK, so it can't also register a (spurious)
@@ -145,13 +162,62 @@ def run_dirty() -> bool:
         ExternalDependency(name="react", version="13.2.0", manifest_path="package.json", ecosystem=Ecosystem.NPM)
     ]
 
-    result = analyze_technical_debt(
+    return DebtFixture(
         file_metrics=file_metrics,
         module_metrics=module_metrics,
         function_complexity=function_complexity,
         symbols=symbols,
         graph_analysis=graph_analysis,
         external_dependencies=external_dependencies,
+    )
+
+
+def build_clean_fixture() -> DebtFixture:
+    """One small, fully-documented, up-to-date, acyclic, uncoupled
+    fixture — expected to produce zero issues / a 0.0 score."""
+    clean_symbol = make_symbol("clean_fn", "app/clean_module/clean.py", "app/clean_module", has_docstring=True)
+    return DebtFixture(
+        file_metrics=[
+            FileMetrics(
+                file_path="app/clean_module/clean.py",
+                module="app/clean_module",
+                language=Language.PYTHON,
+                total_lines=10,
+                loc=8,
+            )
+        ],
+        module_metrics=[
+            ModuleMetrics(
+                module="app/clean_module",
+                file_count=1,
+                total_lines=10,
+                loc=8,
+                function_count=1,
+                avg_complexity=2.0,
+                max_complexity=2,
+            )
+        ],
+        function_complexity=[FunctionComplexity(symbol=clean_symbol, complexity=2)],
+        symbols=[clean_symbol],  # a single symbol — below MIN_SYMBOLS_FOR_DOC_CHECK regardless of doc ratio
+        graph_analysis=GraphAnalysis(cycles=[], circular_files=frozenset(), circular_edges=(), coupling=[], orphans=[]),
+        external_dependencies=[
+            ExternalDependency(name="react", version="18.2.0", manifest_path="package.json", ecosystem=Ecosystem.NPM)
+        ],
+    )
+
+
+def run_dirty() -> bool:
+    print("=== dirty fixture — one planted violation per rule ===")
+    all_passed = True
+
+    fixture = build_dirty_fixture()
+    result = analyze_technical_debt(
+        file_metrics=fixture.file_metrics,
+        module_metrics=fixture.module_metrics,
+        function_complexity=fixture.function_complexity,
+        symbols=fixture.symbols,
+        graph_analysis=fixture.graph_analysis,
+        external_dependencies=fixture.external_dependencies,
     )
 
     all_passed &= _check("exactly 7 issues (one per rule)", len(result.issues) == 7, str(result.issues))
@@ -204,34 +270,14 @@ def run_clean() -> bool:
     print("\n=== clean fixture — small, documented, up-to-date, acyclic, uncoupled ===")
     all_passed = True
 
-    clean_symbol = _make_symbol("clean_fn", "app/clean_module/clean.py", "app/clean_module", has_docstring=True)
+    fixture = build_clean_fixture()
     result = analyze_technical_debt(
-        file_metrics=[
-            FileMetrics(
-                file_path="app/clean_module/clean.py",
-                module="app/clean_module",
-                language=Language.PYTHON,
-                total_lines=10,
-                loc=8,
-            )
-        ],
-        module_metrics=[
-            ModuleMetrics(
-                module="app/clean_module",
-                file_count=1,
-                total_lines=10,
-                loc=8,
-                function_count=1,
-                avg_complexity=2.0,
-                max_complexity=2,
-            )
-        ],
-        function_complexity=[FunctionComplexity(symbol=clean_symbol, complexity=2)],
-        symbols=[clean_symbol],  # a single symbol — below MIN_SYMBOLS_FOR_DOC_CHECK regardless of doc ratio
-        graph_analysis=GraphAnalysis(cycles=[], circular_files=frozenset(), circular_edges=(), coupling=[], orphans=[]),
-        external_dependencies=[
-            ExternalDependency(name="react", version="18.2.0", manifest_path="package.json", ecosystem=Ecosystem.NPM)
-        ],
+        file_metrics=fixture.file_metrics,
+        module_metrics=fixture.module_metrics,
+        function_complexity=fixture.function_complexity,
+        symbols=fixture.symbols,
+        graph_analysis=fixture.graph_analysis,
+        external_dependencies=fixture.external_dependencies,
     )
 
     all_passed &= _check("no issues", result.issues == [], str(result.issues))
