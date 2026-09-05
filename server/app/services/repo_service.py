@@ -1,8 +1,14 @@
 """Repository/branch persistence backing the `app/api/v1/github.py` repo and
-branch endpoints (Phase 2.4). `persist_analysis_run` (Phase 4.4) lives here
-too — the single place a Phase 3 `AnalysisResult` (pure, in-memory) becomes
-real `AnalysisRun`/`File`/`Symbol`/`DependencyEdge`/`ApiEndpoint`/`DebtIssue`
-rows.
+branch endpoints (Phase 2.4). `create_queued_analysis_run` /
+`persist_analysis_run` / `mark_analysis_run_failed` (Phase 4.4, split for
+async use in Phase 5.1) live here too — together they're the place a Phase 3
+`AnalysisResult` (pure, in-memory) becomes real `AnalysisRun`/`File`/
+`Symbol`/`DependencyEdge`/`ApiEndpoint`/`DebtIssue` rows, across the two
+separate transactions Phase 5's "API queues now, Celery finalizes later"
+lifecycle needs: `create_queued_analysis_run` inserts the `QUEUED` row and
+returns immediately; `persist_analysis_run`/`mark_analysis_run_failed` each
+finalize an already-existing row later, to `COMPLETED` or `FAILED`
+respectively.
 """
 
 import uuid
@@ -171,54 +177,159 @@ def select_branch(db: Session, repository: Repository, branch_name: str, commit_
     return target
 
 
-def persist_analysis_run(
-    db: Session, *, repository_id: uuid.UUID, branch: str, analysis_result: AnalysisResult
+def create_queued_analysis_run(
+    db: Session, *, repository_id: uuid.UUID, branch: str, commit_sha: str
 ) -> AnalysisRun:
-    """Persists one Phase 3 `AnalysisResult` (`analysis/pipeline.py`) as a
-    full row snapshot: a new `AnalysisRun` plus its `File`/`Symbol`/
-    `DependencyEdge`/`ApiEndpoint`/`DebtIssue` children — each `AnalysisRun`
-    gets its own complete snapshot, not diffed against the previous run
-    (simplest correct model for history/comparison later). Runs Phase 4.2's
-    `analyze_dependency_graph` (for `DependencyEdge.is_circular`) and Phase
-    4.3's `analyze_technical_debt` (for the `DebtIssue` rows plus the run's
-    aggregate `debt_score`) as part of the same call — this is the one
-    place those two pure modules' output actually reaches the database.
+    """Phase 5's async-lifecycle entry point: a lightweight, insert-only
+    counterpart to `persist_analysis_run` below. Called synchronously from
+    the API layer (Phase 5.4's `POST /repos/{id}/analysis-runs`) so the
+    caller gets a real `AnalysisRun.id` back immediately — well before the
+    actual analysis pipeline has even started running in Celery. Creates
+    exactly one `AnalysisRun` row with `status=QUEUED` (`started_at`
+    defaults to insert time via the column's own `server_default`, same as
+    `created_at` — see Known Issue #12 on "queued" vs. "started") and flips
+    `Repository.analysis_status` to `QUEUED` too.
 
-    **One transaction end to end.** Every row's `id` is generated explicitly
-    here (`uuid.uuid4()`) rather than left to the column's own `default=`
-    (which SQLAlchemy only applies at flush time) — that's what lets a
-    child row's FK column reference the right id immediately, in Python,
-    before anything is sent to the DB. Nothing in this table family uses
-    `relationship()` (plain FK columns + explicit `select()`, matching this
-    module's existing style above), so FK resolution is done by hand via
-    two lookup maps: `file_id_by_path` (`FileMetrics.file_path` ->
-    generated `File.id`) and `symbol_id_by_symbol` (the frozen, hashable
-    `Symbol` dataclass instance -> generated `Symbol` row id), the latter
-    resolving `ApiRoute.handler_symbol` -> `ApiEndpoint.handler_symbol_id`.
-    `db.commit()` is called exactly once, at the very end; any exception
-    before that triggers `db.rollback()` and re-raises unchanged — nothing
-    partial is ever left committed, and no `FAILED` `AnalysisRun` row is
-    ever written on that path (that status transition belongs to Phase 5's
-    Celery-driven state machine, not this synchronous call).
+    Nothing else happens here — no `File`/`Symbol`/... rows, no pipeline
+    execution. Once a background worker has actually produced an
+    `AnalysisResult` for this row, it hands the row back to
+    `persist_analysis_run` (success) or `mark_analysis_run_failed` (the
+    pipeline raised) below.
 
     Raises `ValueError` if `repository_id` doesn't resolve to a real
-    `Repository` row — this is an internal service function, not an API
-    endpoint; callers are expected to have already validated the repository
-    exists (e.g. via `get_repository_for_user`).
+    `Repository` row — same contract `persist_analysis_run` used to have
+    itself before this split; it now lives here, since this is the function
+    that actually creates a row from a bare `repository_id` rather than
+    finalizing one that already exists. This is an internal service
+    function, not an API endpoint; callers are expected to have already
+    validated the repository exists (e.g. via `get_repository_for_user`).
     """
     repository = db.get(Repository, repository_id)
     if repository is None:
         raise ValueError(f"no Repository with id={repository_id}")
 
+    analysis_run = AnalysisRun(
+        id=uuid.uuid4(),
+        repository_id=repository_id,
+        branch=branch,
+        commit_sha=commit_sha,
+        status=AnalysisRunStatus.QUEUED,
+    )
+    repository.analysis_status = RepositoryAnalysisStatus.QUEUED
+
+    db.add(analysis_run)
+    db.add(repository)
+    db.commit()
+    db.refresh(analysis_run)
+    return analysis_run
+
+
+def mark_analysis_run_failed(
+    db: Session, *, analysis_run: AnalysisRun, error_message: str
+) -> AnalysisRun:
+    """The first code path that ever writes `AnalysisRunStatus.FAILED`.
+    Phase 5's Celery task calls this when the pipeline (or
+    `persist_analysis_run` itself) raises partway through a `QUEUED` run, so
+    the row reflects the failure instead of being left stuck at `QUEUED`/an
+    intermediate stage forever. Mirrors `persist_analysis_run`'s own
+    `Repository` bookkeeping on the success path: `Repository.analysis_status`
+    moves to `FAILED` too.
+
+    `completed_at` is set here as well, not left `None` — there's no
+    separate `failed_at` column, and a failed run has, same as a completed
+    one, stopped being actively processed; leaving it null on failure would
+    make "how long did this run take" / "when did it stop" unanswerable for
+    every failed run.
+
+    One transaction, same rollback-and-reraise discipline as
+    `persist_analysis_run` below — a failure while merely recording a
+    failure should never itself leave a half-updated row.
+
+    `analysis_run` is expected to already be attached to `db` (the normal
+    case: a caller loads it via `db.get(AnalysisRun, id)` in the same
+    session, then calls this on failure) — this function doesn't merge a
+    detached instance from another session.
+    """
+    repository = db.get(Repository, analysis_run.repository_id)
+    if repository is None:
+        raise ValueError(f"no Repository with id={analysis_run.repository_id}")
+
     try:
-        analysis_run_id = uuid.uuid4()
-        analysis_run = AnalysisRun(
-            id=analysis_run_id,
-            repository_id=repository_id,
-            branch=branch,
-            commit_sha=analysis_result.commit_sha,
-            status=AnalysisRunStatus.QUEUED,
-        )
+        analysis_run.status = AnalysisRunStatus.FAILED
+        analysis_run.error_message = error_message
+        analysis_run.completed_at = datetime.now(timezone.utc)
+        repository.analysis_status = RepositoryAnalysisStatus.FAILED
+
+        db.add(analysis_run)
+        db.add(repository)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(analysis_run)
+    return analysis_run
+
+
+def persist_analysis_run(
+    db: Session, *, analysis_run: AnalysisRun, analysis_result: AnalysisResult
+) -> AnalysisRun:
+    """Persists one Phase 3 `AnalysisResult` (`analysis/pipeline.py`) onto an
+    *existing* `AnalysisRun` row — its `File`/`Symbol`/`DependencyEdge`/
+    `ApiEndpoint`/`DebtIssue` children, plus finalizing the run itself to
+    `COMPLETED`. Each `AnalysisRun` gets its own complete row snapshot, not
+    diffed against the previous run (simplest correct model for history/
+    comparison later). Runs Phase 4.2's `analyze_dependency_graph` (for
+    `DependencyEdge.is_circular`) and Phase 4.3's `analyze_technical_debt`
+    (for the `DebtIssue` rows plus the run's aggregate `debt_score`) as part
+    of the same call — this is the one place those two pure modules' output
+    actually reaches the database.
+
+    As of Phase 5.1, this function no longer creates the `AnalysisRun` row
+    itself — it takes one already created by `create_queued_analysis_run`
+    above (`status=QUEUED` at that point), so the API layer can hand back a
+    real id before the pipeline has even started running. `analysis_run` is
+    expected to already be attached to `db` (see `mark_analysis_run_failed`'s
+    docstring above for the same assumption).
+
+    **One transaction end to end.** Every child row's `id` is generated
+    explicitly here (`uuid.uuid4()`) rather than left to the column's own
+    `default=` (which SQLAlchemy only applies at flush time) — that's what
+    lets a child row's FK column reference the right id immediately, in
+    Python, before anything is sent to the DB. Nothing in this table family
+    uses `relationship()` (plain FK columns + explicit `select()`, matching
+    this module's existing style above), so FK resolution is done by hand
+    via two lookup maps: `file_id_by_path` (`FileMetrics.file_path` ->
+    generated `File.id`) and `symbol_id_by_symbol` (the frozen, hashable
+    `Symbol` dataclass instance -> generated `Symbol` row id), the latter
+    resolving `ApiRoute.handler_symbol` -> `ApiEndpoint.handler_symbol_id`.
+    `db.commit()` is called exactly once, at the very end; any exception
+    before that triggers `db.rollback()` and re-raises unchanged — nothing
+    partial is ever left committed. Note that this no longer means "nothing
+    at all is left in the DB": the `QUEUED` `AnalysisRun` row itself was
+    already committed by `create_queued_analysis_run` in an earlier,
+    separate transaction, so a failure here leaves that row behind exactly
+    as it was (still `QUEUED`) with none of its children — it's the
+    caller's job to then call `mark_analysis_run_failed` on it.
+
+    Raises `ValueError` if `analysis_run.repository_id` doesn't resolve to a
+    real `Repository` row — this is an internal service function, not an
+    API endpoint; callers are expected to have already validated the
+    repository exists (e.g. via `get_repository_for_user`).
+    """
+    repository = db.get(Repository, analysis_run.repository_id)
+    if repository is None:
+        raise ValueError(f"no Repository with id={analysis_run.repository_id}")
+
+    repository_id = analysis_run.repository_id
+    analysis_run_id = analysis_run.id
+
+    try:
+        # The pipeline's own resolved commit_sha is the source of truth for
+        # what was actually analyzed — kept in sync here in case it ever
+        # diverges from the commit_sha create_queued_analysis_run recorded
+        # at queue time (expected to already match in every real call path).
+        analysis_run.commit_sha = analysis_result.commit_sha
 
         # --- Files -----------------------------------------------------------
         size_by_path = {f.path: f.size_bytes for f in analysis_result.files}

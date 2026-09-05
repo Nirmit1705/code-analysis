@@ -1,6 +1,10 @@
 """Manual smoke test for Phase 4.4's `persist_analysis_run`
 (`app/services/repo_service.py`) — the first script that actually touches
-the real dev database.
+the real dev database. Updated in Phase 5.1 for the `create_queued_analysis_run`
+/ `persist_analysis_run` / `mark_analysis_run_failed` split (every call site
+below now creates the `QUEUED` row first via `create_queued_analysis_run`,
+then finalizes it via `persist_analysis_run` — the two-call convention Phase
+5's async lifecycle needs).
 
 Per the plan-mode discussion that shaped this test (see
 `docs/BACKEND_IMPLEMENTATION_PLAN.md`'s Phase 4.4 section): **no new
@@ -40,10 +44,14 @@ Five groups:
    narrower reuse, see that function's own comment).
 3. `run_transaction_atomicity()` — forces a NOT-NULL violation partway
    through persistence (a `Symbol` with `name=None`) and asserts: the
-   exception propagates out of `persist_analysis_run`, nothing at all
-   commits (no new `AnalysisRun` row for the attempt), and no `FAILED`
-   `AnalysisRun` row is ever written (that's Phase 5's job). Also checks
-   the `repository_id`-not-found pre-flight `ValueError`.
+   exception propagates out of `persist_analysis_run`, its own transaction
+   rolls back in full (no `File`/`Symbol`/etc. rows for the attempt), and
+   the already-committed `QUEUED` row from `create_queued_analysis_run`
+   survives untouched — still `QUEUED`, not silently `FAILED` — until
+   `mark_analysis_run_failed` is called on it explicitly (also exercised
+   here, simulating Phase 5.3's Celery task). Also checks the
+   `repository_id`-not-found pre-flight `ValueError`, now
+   `create_queued_analysis_run`'s contract.
 4. `run_real_repo_dogfood()` (secondary) — this repo's own `server/app` +
    `client/src`, same ingestion `smoke_analysis.py` already builds;
    cross-checked against independently recomputed graph/debt analyses;
@@ -84,7 +92,11 @@ from app.models.repository import Repository, RepositoryAnalysisStatus  # noqa: 
 from app.models.symbol import Symbol as SymbolRow  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services import github_service  # noqa: E402
-from app.services.repo_service import persist_analysis_run  # noqa: E402
+from app.services.repo_service import (  # noqa: E402
+    create_queued_analysis_run,
+    mark_analysis_run_failed,
+    persist_analysis_run,
+)
 from smoke_debt import DebtFixture, build_clean_fixture, build_dirty_fixture, make_symbol  # noqa: E402
 
 SERVER_ROOT = Path(__file__).resolve().parent.parent  # server/
@@ -218,7 +230,10 @@ def run_dependency_cycle_persistence(db: Session, repository: Repository) -> boo
         result = analyze_ingested(ingestion_result, commit_sha=commit_sha)
 
         _clear_previous_runs(db, repository)
-        run = persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=result)
+        queued_run = create_queued_analysis_run(
+            db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+        )
+        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
 
         file_rows = db.execute(select(File).where(File.analysis_run_id == run.id)).scalars().all()
         symbol_rows = db.execute(select(SymbolRow).where(SymbolRow.analysis_run_id == run.id)).scalars().all()
@@ -346,10 +361,14 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
     all_passed = True
 
     dirty_fixture = build_dirty_fixture()
-    dirty_result = _synthetic_analysis_result(dirty_fixture, commit_sha="debtdirty0000000000000000000000000000"[:40])
+    dirty_commit_sha = "debtdirty0000000000000000000000000000"[:40]
+    dirty_result = _synthetic_analysis_result(dirty_fixture, commit_sha=dirty_commit_sha)
 
     _clear_previous_runs(db, repository)
-    dirty_run = persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=dirty_result)
+    dirty_queued = create_queued_analysis_run(
+        db, repository_id=repository.id, branch="main", commit_sha=dirty_commit_sha
+    )
+    dirty_run = persist_analysis_run(db, analysis_run=dirty_queued, analysis_result=dirty_result)
 
     dirty_issues = db.execute(select(DebtIssue).where(DebtIssue.analysis_run_id == dirty_run.id)).scalars().all()
     by_type = {issue.issue_type: issue for issue in dirty_issues}
@@ -398,9 +417,13 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
     )
 
     clean_fixture = build_clean_fixture()
-    clean_result = _synthetic_analysis_result(clean_fixture, commit_sha="debtclean0000000000000000000000000000"[:40])
+    clean_commit_sha = "debtclean0000000000000000000000000000"[:40]
+    clean_result = _synthetic_analysis_result(clean_fixture, commit_sha=clean_commit_sha)
     _clear_previous_runs(db, repository)
-    clean_run = persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=clean_result)
+    clean_queued = create_queued_analysis_run(
+        db, repository_id=repository.id, branch="main", commit_sha=clean_commit_sha
+    )
+    clean_run = persist_analysis_run(db, analysis_run=clean_queued, analysis_result=clean_result)
     clean_issue_count = db.execute(
         select(func.count()).select_from(DebtIssue).where(DebtIssue.analysis_run_id == clean_run.id)
     ).scalar_one()
@@ -415,22 +438,25 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
 
 def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
     print("\n=== group 3: transaction atomicity — a forced failure must roll back completely ===")
+    print("    (semantics updated for Phase 5.1's create_queued_analysis_run / persist_analysis_run /")
+    print("     mark_analysis_run_failed split — see this function's own comments below)")
     all_passed = True
 
     import uuid as uuid_module
 
     all_passed &= _check(
-        "unknown repository_id raises ValueError before touching the DB",
-        _raises_value_error(lambda: persist_analysis_run(
-            db, repository_id=uuid_module.uuid4(), branch="main",
-            analysis_result=_synthetic_analysis_result(build_clean_fixture(), commit_sha="x" * 40),
+        "unknown repository_id raises ValueError before touching the DB "
+        "(now create_queued_analysis_run's contract, not persist_analysis_run's)",
+        _raises_value_error(lambda: create_queued_analysis_run(
+            db, repository_id=uuid_module.uuid4(), branch="main", commit_sha="x" * 40,
         )),
     )
 
     good_symbol = make_symbol("ok_fn", "broken/mod/file.py", "broken/mod", has_docstring=True)
     bad_symbol = make_symbol(None, "broken/mod/file.py", "broken/mod", has_docstring=True)  # violates Symbol.name NOT NULL
+    commit_sha = "atomicity000000000000000000000000000"[:40]
     analysis_result = AnalysisResult(
-        commit_sha="atomicity000000000000000000000000000"[:40],
+        commit_sha=commit_sha,
         files=[IngestedFile(path="broken/mod/file.py", absolute_path=Path("broken/mod/file.py"), size_bytes=10)],
         ignored_paths=[],
         language_counts={},
@@ -450,8 +476,17 @@ def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
         select(func.count()).select_from(AnalysisRun).where(AnalysisRun.repository_id == repository.id)
     ).scalar_one()
 
+    # create_queued_analysis_run is its own committed transaction (that's the
+    # whole point of the split — the QUEUED row must survive independently of
+    # whatever persist_analysis_run does later), so this row's existence is
+    # expected, not a leak, even though the persist_analysis_run call below
+    # will fail.
+    queued_run = create_queued_analysis_run(
+        db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+    )
+
     raised = _raises_value_error(
-        lambda: persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=analysis_result),
+        lambda: persist_analysis_run(db, analysis_run=queued_run, analysis_result=analysis_result),
         any_exception=True,
     )
     all_passed &= _check("exception propagated out of persist_analysis_run", raised)
@@ -460,18 +495,44 @@ def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
         select(func.count()).select_from(AnalysisRun).where(AnalysisRun.repository_id == repository.id)
     ).scalar_one()
     all_passed &= _check(
-        "no AnalysisRun row committed for the failed attempt (whole transaction rolled back)",
-        after_count == before_count, f"before={before_count} after={after_count}",
+        "exactly one AnalysisRun row exists — the QUEUED row create_queued_analysis_run "
+        "already committed, and nothing more (persist_analysis_run's own transaction "
+        "rolled back in full, it didn't create a second row)",
+        after_count == before_count + 1, f"before={before_count} after={after_count}",
     )
 
-    failed_status_count = db.execute(
-        select(func.count()).select_from(AnalysisRun).where(
-            AnalysisRun.repository_id == repository.id, AnalysisRun.status == AnalysisRunStatus.FAILED
-        )
+    orphaned_file_count = db.execute(
+        select(func.count()).select_from(File).where(File.analysis_run_id == queued_run.id)
     ).scalar_one()
     all_passed &= _check(
-        "no FAILED AnalysisRun row exists (that status transition is Phase 5's job, not 4.4's)",
-        failed_status_count == 0,
+        "zero File rows exist for the QUEUED run (the good_symbol/bad_symbol batch never committed)",
+        orphaned_file_count == 0, str(orphaned_file_count),
+    )
+
+    still_queued = db.execute(
+        select(AnalysisRun.status).where(AnalysisRun.id == queued_run.id)
+    ).scalar_one()
+    all_passed &= _check(
+        "the AnalysisRun row is still QUEUED (persist_analysis_run's failure didn't half-write "
+        "COMPLETED, and nothing auto-transitions it to FAILED — that's mark_analysis_run_failed's "
+        "job, called explicitly below)",
+        still_queued is AnalysisRunStatus.QUEUED, str(still_queued),
+    )
+
+    # New in 5.1 — exercise mark_analysis_run_failed against the same stuck
+    # QUEUED row, simulating what Phase 5.3's Celery task will do on a real
+    # pipeline failure.
+    failed_run = mark_analysis_run_failed(db, analysis_run=queued_run, error_message="synthetic failure for smoke test")
+    all_passed &= _check("mark_analysis_run_failed sets status=FAILED", failed_run.status is AnalysisRunStatus.FAILED)
+    all_passed &= _check(
+        "mark_analysis_run_failed records the error_message",
+        failed_run.error_message == "synthetic failure for smoke test", str(failed_run.error_message),
+    )
+    all_passed &= _check("mark_analysis_run_failed sets completed_at", failed_run.completed_at is not None)
+    db.refresh(repository)
+    all_passed &= _check(
+        "mark_analysis_run_failed sets Repository.analysis_status == FAILED",
+        repository.analysis_status is RepositoryAnalysisStatus.FAILED, str(repository.analysis_status),
     )
 
     return all_passed
@@ -522,7 +583,10 @@ def run_real_repo_dogfood(db: Session, repository: Repository) -> bool:
     )
 
     _clear_previous_runs(db, repository)
-    run = persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=result)
+    queued_run = create_queued_analysis_run(
+        db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+    )
+    run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
 
     all_passed &= _check("AnalysisRun.status == COMPLETED", run.status is AnalysisRunStatus.COMPLETED)
     all_passed &= _check("AnalysisRun.completed_at is set", run.completed_at is not None)
@@ -604,7 +668,10 @@ def run_live_bonus(db: Session, user: User) -> bool:
             owner=LIVE_TEST_OWNER, name=LIVE_TEST_REPO,
         )
         _clear_previous_runs(db, repository)
-        run = persist_analysis_run(db, repository_id=repository.id, branch="main", analysis_result=result)
+        queued_run = create_queued_analysis_run(
+            db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+        )
+        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
 
         file_count = db.execute(
             select(func.count()).select_from(File).where(File.analysis_run_id == run.id)
