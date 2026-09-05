@@ -8,5 +8,26 @@ services:
     volumes:
       - redis_data:/data
 
+  # For reproducibility/documentation only (Phase 5.2) — local dev keeps
+  # using the native Windows PostgreSQL 17.4 + pgvector 0.8.6 install from
+  # Phase 0 (see server/.env's DATABASE_URL); nothing in this repo points at
+  # this container by default. Mapped to host port 5433, not 5432, so it
+  # doesn't collide with that native install if both ever run at once.
+  # `pgvector/pgvector:pg17` bundles Postgres 17.x with the pgvector
+  # extension already installed, matching Phase 0's locked choices.
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: ai-codebase-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: codebase_intelligence
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
 volumes:
   redis_data:
+  postgres_data:

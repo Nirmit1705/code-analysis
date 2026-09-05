@@ -5,6 +5,7 @@ listing and selection (`GET /github/repos`, `POST /repos`, `GET
 Phase 2.4 endpoints on `repos_router` below, in this same file per the plan.
 """
 
+import hashlib
 import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import get_settings
+from app.core.redis import get_redis_client
 from app.core.security import (
     create_access_token,
     create_action_token,
@@ -48,6 +50,11 @@ STATE_TOKEN_TYPE = "github_install_state"
 # enough for the browser to load `/onboarding` and fire the exchange call).
 EXCHANGE_TOKEN_TYPE = "github_callback_exchange"
 EXCHANGE_TOKEN_TTL = timedelta(seconds=60)
+
+# Phase 5.2 (Known Issue #2): Redis key prefix for the exchange-code
+# redemption check below — keyed on sha256(code), never the raw code itself,
+# so a Redis `KEYS`/dump doesn't hand out live exchange codes.
+EXCHANGE_REDEMPTION_KEY_PREFIX = "github_exchange_redeemed:"
 
 
 @router.get("/install", response_model=GitHubInstallResponse)
@@ -128,18 +135,28 @@ def github_exchange(payload: GitHubExchangeRequest, db: Session = Depends(get_db
     would otherwise carry live tokens for as long as they're valid, the
     refresh token especially since it's long-lived).
 
-    Not enforced as strictly single-use (no server-side redemption tracking
-    — would need a store, and Redis isn't wired into the app yet outside
-    Celery's Phase 5 config) — mitigated by the 60s expiry on
-    `EXCHANGE_TOKEN_TYPE` tokens instead, an explicit MVP simplification in
-    the same spirit as the debt-detection heuristics elsewhere in this
-    codebase. Revisit once Redis is wired in for Phase 5.
+    **Phase 5.2 (Known Issue #2, resolved): server-side single-use
+    enforcement.** A Redis `SETNX`-style redemption key (`sha256(code)`,
+    never the raw code, TTL matching `EXCHANGE_TOKEN_TTL`) is checked right
+    after the decode/expiry/type validation below — a second exchange
+    attempt with the exact same code is rejected with the same generic 400
+    an invalid/expired code gets, well within the code's own 60s window, not
+    just once it actually expires. Previously (Phase 2.5) this was only
+    mitigated by that 60s expiry, with no redemption tracking at all, since
+    Redis wasn't wired into the app yet.
     """
     try:
         decoded = decode_token(payload.code)
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
     if decoded.get("type") != EXCHANGE_TOKEN_TYPE or not decoded.get("sub"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
+
+    redemption_key = EXCHANGE_REDEMPTION_KEY_PREFIX + hashlib.sha256(payload.code.encode("utf-8")).hexdigest()
+    first_use = get_redis_client().set(
+        redemption_key, "1", nx=True, ex=int(EXCHANGE_TOKEN_TTL.total_seconds())
+    )
+    if not first_use:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
 
     user = get_user_by_email(db, decoded["sub"])
