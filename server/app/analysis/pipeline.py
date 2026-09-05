@@ -84,6 +84,7 @@ def analyze_commit(
     max_archive_bytes: int = ingestion.DEFAULT_MAX_ARCHIVE_BYTES,
     max_extracted_bytes: int = ingestion.DEFAULT_MAX_EXTRACTED_BYTES,
     max_file_count: int = ingestion.DEFAULT_MAX_FILE_COUNT,
+    on_stage: Callable[[str], None] | None = None,
 ) -> AnalysisResult:
     """Runs the full Phase 3 pipeline against `repo` at the *exact*
     `commit_sha` given via GitHub's tarball API (Phase 3.1). A thin
@@ -92,6 +93,13 @@ def analyze_commit(
     is independently testable against any already-available file set,
     including this repo's own source read straight off disk, without
     needing live GitHub credentials for every test run.
+
+    `on_stage` (Phase 5.3) is forwarded straight through to `analyze_ingested`
+    — see that function's own docstring. Not used by Phase 5.3's Celery task
+    itself (which calls `ingest_repository`/`analyze_ingested` directly so it
+    can transition to `CLONING` before ingestion even starts — see
+    `workers/tasks/analysis_tasks.py`), added here only for API parity so a
+    caller of this convenience wrapper isn't left without the option.
     """
     with ingestion.ingest_repository(
         installation_token=installation_token,
@@ -103,14 +111,49 @@ def analyze_commit(
         max_extracted_bytes=max_extracted_bytes,
         max_file_count=max_file_count,
     ) as ingestion_result:
-        return analyze_ingested(ingestion_result, commit_sha=commit_sha)
+        return analyze_ingested(ingestion_result, commit_sha=commit_sha, on_stage=on_stage)
 
 
-def analyze_ingested(ingestion_result: ingestion.IngestionResult, *, commit_sha: str) -> AnalysisResult:
+def analyze_ingested(
+    ingestion_result: ingestion.IngestionResult,
+    *,
+    commit_sha: str,
+    on_stage: Callable[[str], None] | None = None,
+) -> AnalysisResult:
     """The Phase 3.2-3.7 analysis pipeline over an already-ingested file
     set — 3.1's own `IngestionResult`, or an equivalent one built another
     way (any caller that already has `IngestedFile`s, e.g. pointing
-    straight at files already on disk)."""
+    straight at files already on disk).
+
+    `on_stage` (Phase 5.3, additive, backward-compatible default `None`):
+    an optional callback fired exactly twice, marking this function's two
+    natural internal stage boundaries — `on_stage("parsing")` once at the
+    very start (covering the per-file file-metrics + symbol-extraction work
+    below) and `on_stage("analyzing")` once symbol extraction is done and
+    the cross-file work begins (API-route composition, dependency-edge
+    extraction, manifest discovery, per-function complexity, module
+    aggregation). This is what lets Phase 5.3's Celery task drive real
+    `AnalysisRun.status` transitions (PARSING/ANALYZING) from *inside* this
+    one still-monolithic function, without this module importing anything
+    about the DB/Celery/Redis — `on_stage` is a plain, untyped-beyond-`str`
+    callback; this function has no idea what (if anything) is on the other
+    end of it. Every existing caller that omits `on_stage` sees byte-for-
+    byte the same behavior as before this parameter existed.
+
+    Per-file resilience (Phase 5.3): a single file's symbol extraction or
+    complexity analysis failing (e.g. an unanticipated bug deep in a
+    recursive AST walk, triggered by some pathological real-world file) no
+    longer aborts the whole run — it's logged and that one file is skipped,
+    matching the "catch, log, skip, continue" per-file stance every other
+    step in this function already takes (see the `OSError` catch on
+    `read_bytes()` below, which predates this). `compute_file_metrics` is
+    deliberately not wrapped the same way — it's documented (and
+    structurally guaranteed, via a `errors="replace"` decode and no
+    Tree-sitter use) to never raise.
+    """
+    if on_stage is not None:
+        on_stage("parsing")
+
     files_by_path: dict[str, bytes] = {}
     file_metrics: list[FileMetrics] = []
     language_counts: Counter[str] = Counter()
@@ -137,9 +180,16 @@ def analyze_ingested(ingestion_result: ingestion.IngestionResult, *, commit_sha:
         extractor = _SYMBOL_EXTRACTORS.get(language) if language is not None else None
         if extractor is None:
             continue
-        file_symbols = extractor(source, file_path=file_path, language=language)
+        try:
+            file_symbols = extractor(source, file_path=file_path, language=language)
+        except Exception as exc:  # noqa: BLE001 — a per-file extractor bug must not abort the whole run
+            logger.warning("skipping symbol extraction for %r: %s", file_path, exc)
+            continue
         symbols_by_file[file_path] = file_symbols
         symbols.extend(file_symbols)
+
+    if on_stage is not None:
+        on_stage("analyzing")
 
     # Each `compose_routes` already filters `files_by_path` down to its own
     # framework's language(s) internally (see each module's own docstring),
@@ -159,11 +209,14 @@ def analyze_ingested(ingestion_result: ingestion.IngestionResult, *, commit_sha:
         language = detect_language(file_path)
         if language is None:
             continue
-        function_complexity.extend(
-            metrics.compute_function_complexity(
+        try:
+            file_complexity = metrics.compute_function_complexity(
                 source, file_path=file_path, language=language, symbols=symbols_by_file.get(file_path, [])
             )
-        )
+        except Exception as exc:  # noqa: BLE001 — a per-file complexity-analysis bug must not abort the whole run
+            logger.warning("skipping complexity analysis for %r: %s", file_path, exc)
+            continue
+        function_complexity.extend(file_complexity)
 
     module_metrics = metrics.aggregate_module_metrics(file_metrics, function_complexity)
 

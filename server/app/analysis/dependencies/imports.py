@@ -68,6 +68,7 @@ Everything here is pure: no DB, no ORM, no FastAPI, no Celery.
 from __future__ import annotations
 
 import json
+import logging
 import posixpath
 import re
 import tomllib
@@ -79,6 +80,8 @@ from tree_sitter import Node
 from app.analysis.dependencies import DependencyEdge, DependencyEdgeType, Ecosystem, ExternalDependency
 from app.analysis.language_detect import Language, detect_language
 from app.analysis.treesitter import parser_registry
+
+logger = logging.getLogger(__name__)
 
 _JS_LANGUAGES = (Language.JAVASCRIPT, Language.TYPESCRIPT, Language.TSX)
 
@@ -121,16 +124,21 @@ def extract_import_edges(
     edges: list[DependencyEdge] = []
     for file_path, source in files.items():
         language = detect_language(file_path)
-        if language in _JS_LANGUAGES:
-            edges.extend(
-                _extract_js_ts_file(
+        try:
+            if language in _JS_LANGUAGES:
+                file_edges = _extract_js_ts_file(
                     source, file_path=file_path, language=language, files_keys=files_keys, path_aliases=aliases
                 )
-            )
-        elif language is Language.PYTHON:
-            edges.extend(_extract_python_file(source, file_path=file_path, files_keys=files_keys))
-        elif language is Language.JAVA:
-            edges.extend(_extract_java_file(source, file_path=file_path, files_keys=files_keys))
+            elif language is Language.PYTHON:
+                file_edges = _extract_python_file(source, file_path=file_path, files_keys=files_keys)
+            elif language is Language.JAVA:
+                file_edges = _extract_java_file(source, file_path=file_path, files_keys=files_keys)
+            else:
+                continue
+        except Exception as exc:  # noqa: BLE001 — a per-file extraction bug must not abort the whole run
+            logger.warning("skipping dependency-edge extraction for %r: %s", file_path, exc)
+            continue
+        edges.extend(file_edges)
     return edges
 
 
@@ -146,14 +154,19 @@ def discover_manifest_dependencies(files: dict[str, bytes]) -> list[ExternalDepe
         name = PurePosixPath(file_path).name
         if name not in _MANIFEST_PARSER_NAMES:
             continue
-        if name == "package.json":
-            deps.extend(parse_package_json(source, file_path=file_path))
-        elif name == "requirements.txt":
-            deps.extend(parse_requirements_txt(source, file_path=file_path))
-        elif name == "pyproject.toml":
-            deps.extend(parse_pyproject_toml(source, file_path=file_path))
-        elif name == "pom.xml":
-            deps.extend(parse_pom_xml(source, file_path=file_path))
+        try:
+            if name == "package.json":
+                manifest_deps = parse_package_json(source, file_path=file_path)
+            elif name == "requirements.txt":
+                manifest_deps = parse_requirements_txt(source, file_path=file_path)
+            elif name == "pyproject.toml":
+                manifest_deps = parse_pyproject_toml(source, file_path=file_path)
+            else:  # name == "pom.xml"
+                manifest_deps = parse_pom_xml(source, file_path=file_path)
+        except Exception as exc:  # noqa: BLE001 — a per-manifest parsing bug must not abort the whole run
+            logger.warning("skipping manifest dependency discovery for %r: %s", file_path, exc)
+            continue
+        deps.extend(manifest_deps)
     return deps
 
 

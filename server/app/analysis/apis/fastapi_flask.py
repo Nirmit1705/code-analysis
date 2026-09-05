@@ -62,6 +62,7 @@ Known limitations:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -74,6 +75,8 @@ from app.analysis.language_detect import Language, detect_language
 from app.analysis.symbols import Symbol, SymbolKind
 from app.analysis.symbols.python import extract_symbols as extract_python_symbols
 from app.analysis.treesitter import parser_registry
+
+logger = logging.getLogger(__name__)
 
 _HTTP_VERBS = frozenset({"get", "post", "put", "delete", "patch"})
 _ROUTER_CONSTRUCTORS = {
@@ -373,7 +376,11 @@ def compose_routes(
     for file_path, source in files.items():
         if detect_language(file_path) != Language.PYTHON:
             continue
-        extractions[file_path] = extract_file(source, file_path=file_path)
+        try:
+            extractions[file_path] = extract_file(source, file_path=file_path)
+        except Exception as exc:  # noqa: BLE001 — a per-file extraction bug must not abort the whole run
+            logger.warning("skipping FastAPI/Flask route extraction for %r: %s", file_path, exc)
+            continue
 
     if symbols_by_file is None:
         symbols_by_file = {fp: extract_python_symbols(files[fp], file_path=fp) for fp in extractions}

@@ -35,6 +35,7 @@ Known limitations:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -46,6 +47,8 @@ from app.analysis.language_detect import Language
 from app.analysis.symbols import Symbol, SymbolKind
 from app.analysis.symbols.java import extract_symbols as extract_java_symbols
 from app.analysis.treesitter import parser_registry
+
+logger = logging.getLogger(__name__)
 
 _CONTROLLER_ANNOTATIONS = frozenset({"RestController", "Controller"})
 _METHOD_ANNOTATIONS = {
@@ -109,7 +112,12 @@ def compose_routes(files: dict[str, bytes], *, symbols_by_file: dict[str, list[S
         if not file_path.endswith(".java"):
             continue
         symbols = symbols_by_file.get(file_path) if symbols_by_file is not None else None
-        routes.extend(extract_routes(source, file_path=file_path, symbols=symbols))
+        try:
+            file_routes = extract_routes(source, file_path=file_path, symbols=symbols)
+        except Exception as exc:  # noqa: BLE001 — a per-file extraction bug must not abort the whole run
+            logger.warning("skipping Spring Boot route extraction for %r: %s", file_path, exc)
+            continue
+        routes.extend(file_routes)
     return routes
 
 

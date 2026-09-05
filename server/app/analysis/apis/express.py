@@ -50,6 +50,7 @@ Known limitations, called out here rather than scattered as TODOs:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -62,6 +63,8 @@ from app.analysis.language_detect import Language, detect_language
 from app.analysis.symbols import Symbol, SymbolKind
 from app.analysis.symbols.js_ts import extract_symbols as extract_js_ts_symbols
 from app.analysis.treesitter import parser_registry
+
+logger = logging.getLogger(__name__)
 
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch"})
 _EXPRESS_JS_LANGUAGES = (Language.JAVASCRIPT, Language.TYPESCRIPT, Language.TSX)
@@ -429,7 +432,11 @@ def compose_routes(
         language = detect_language(file_path)
         if language not in _EXPRESS_JS_LANGUAGES:
             continue
-        extractions[file_path] = extract_file(source, file_path=file_path, language=language)
+        try:
+            extractions[file_path] = extract_file(source, file_path=file_path, language=language)
+        except Exception as exc:  # noqa: BLE001 — a per-file extraction bug must not abort the whole run
+            logger.warning("skipping Express route extraction for %r: %s", file_path, exc)
+            continue
 
     if symbols_by_file is None:
         symbols_by_file = {
