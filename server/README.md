@@ -1,0 +1,89 @@
+# AI Codebase Intelligence Platform — Backend
+
+FastAPI + SQLAlchemy/Alembic + PostgreSQL/pgvector + Redis/Celery. This README covers **local development setup only** — getting a clean checkout of `server/` into a fully working local environment. For what's actually built and what's next, see `CLAUDE.md` and `../docs/BACKEND_IMPLEMENTATION_PLAN.md`.
+
+PostgreSQL, Redis, the FastAPI server, and a Celery worker are the normal local backend development requirements — all four need to be running together. Smee is optional: a relay client needed only when you're working on GitHub webhook delivery, not for normal API/analysis development. Each is documented below with its exact command.
+
+## Prerequisites
+
+- **Python 3.12** (pinned in `.python-version`; `pyproject.toml` accepts 3.11+) and [`uv`](https://docs.astral.sh/uv/) as the package manager. This project is not installed as an importable package (`[tool.uv] package = false` in `pyproject.toml`), so every command below is run through `uv run <cmd>`, not a bare command against a manually activated venv.
+- **PostgreSQL 17.x with the `pgvector` extension available**, installed natively (a native Windows install is what this project's own dev environment actually uses — see "Database" below for why the Postgres service in `docker-compose.yml` is *not* this).
+- **Docker Desktop**, for running Redis locally.
+- **Node.js (`npx`)**, only if you're working on GitHub webhook delivery — needed for the Smee relay client.
+
+## One-time environment setup
+
+1. Copy `.env.example` to `.env` and fill it in:
+   - `DATABASE_URL` — point at your native Postgres install, e.g. `postgresql://postgres:password@localhost:5432/codebase_intelligence` (percent-encode special characters in the password, e.g. `@` → `%40`).
+   - `REDIS_URL` — `redis://localhost:6379/0` (matches the Redis container below; no change needed).
+   - `SECRET_KEY` — any random string (used to sign JWTs).
+   - `TOKEN_ENCRYPTION_KEY` — a Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+   - `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET` — from your GitHub App's settings page (App ID/Client ID/Client Secret/webhook secret shown there directly; `GITHUB_PRIVATE_KEY_PATH` points at the `.pem` file you download from the same page — keep it outside version control, e.g. under a gitignored `secrets/` directory).
+   - `SMEE_WEBHOOK_URL` — only needed for webhook work; a channel URL from [smee.io](https://smee.io) (click "Start a new channel").
+   - `LLM_API_KEY` / embedding/reranker settings — not required for Phases 1–6 of this backend; fill in when Phase 7/8 work needs them.
+   - **Note:** `.env.example` also documents `SMEE_WEBHOOK_URL`, `RERANKER_MODEL`, and `BACKEND_URL`, but `app/core/config.py::Settings` doesn't declare them as fields yet (they're silently ignored — `extra="ignore"`). They're there for forward/manual reference, not because app code reads them today.
+2. Install dependencies: `uv sync` (from `server/`).
+
+## Database
+
+Real local development uses a **native Postgres install**, not a container. `docker-compose.yml`'s `postgres` service (mapped to host port `5433`, not `5432`) exists purely for reproducibility/documentation — nothing in this app points at it by default. Don't run it expecting it to be your dev database; use your native install (port `5432`, matching `DATABASE_URL` above).
+
+Once `DATABASE_URL` points at a real, reachable Postgres instance, run migrations:
+
+```
+uv run alembic upgrade head
+```
+
+This also enables the `vector` extension (pgvector) automatically — it's done by the first migration, not a manual step.
+
+There's no seed/bootstrap script. Once migrations are applied, create your first user through the running API (`POST /api/v1/auth/register`) — see "Quick sanity check" below.
+
+## The four local processes
+
+### 1. FastAPI server
+
+```
+uv run uvicorn app.main:app --reload
+```
+
+Serves on `http://localhost:8000` by default.
+
+### 2. Redis
+
+```
+docker compose up -d redis
+```
+
+(Run from `server/`.) Starts the `ai-codebase-redis` container on `localhost:6379` — the Celery broker/result backend, and the backing transport for analysis-run WebSocket progress events. This is the only service from `docker-compose.yml` that local dev actually depends on; the file's `postgres` service is documentation-only (see "Database" above).
+
+### 3. Celery worker
+
+```
+uv run celery -A app.workers.celery_app worker --loglevel=info --pool=solo
+```
+
+**`--pool=solo` is required on native Windows** — Celery's default prefork pool doesn't work there. If you're on Linux/macOS, or running the worker inside Docker/WSL, the default pool works and `--pool=solo` isn't needed.
+
+### 4. Smee relay (webhook work only)
+
+Not needed for normal API/analysis development — only when testing GitHub webhook delivery (which the app doesn't yet handle; see below).
+
+```
+npx smee-client@latest --url <your SMEE_WEBHOOK_URL from .env> --path /api/v1/webhooks/github --port 8000
+```
+
+This forwards webhook deliveries from your Smee channel to the local FastAPI server. **The target route (`/api/v1/webhooks/github`) doesn't exist yet** (it's built in a later phase) — forwarded deliveries will harmlessly 404 until then. That's expected, not a bug.
+
+## Quick sanity check
+
+- API: `GET http://localhost:8000/api/v1/health` should return `200` (it also round-trips a DB query, so this confirms Postgres connectivity too).
+- Celery worker: check its own startup log — it should show both `run_repository_analysis` and `ping` registered, and connect to Redis without error. No need to actually invoke a task to consider the process "up."
+- To exercise the full stack, register a user (`POST /api/v1/auth/register`), then follow the GitHub App connect flow from the frontend (or `server/scripts/smoke_*.py` for backend-only checks — see `CLAUDE.md` for what each smoke script covers).
+
+## Troubleshooting
+
+- **Wrong Postgres port** — native dev Postgres is `5432`; the `docker-compose.yml` Postgres service (doc-only, not used by default) is `5433`. Don't mix them up in `DATABASE_URL`.
+- **Redis connection refused** — make sure Docker Desktop is running before `docker compose up -d redis`.
+- **Celery worker won't start / hangs on Windows** — you're likely missing `--pool=solo`; the default prefork pool isn't supported on native Windows.
+- **Smee deliveries 404** — expected until the webhook route is built; not a sign anything is misconfigured.
+- **Smee client fails with `Error: The provided URL is invalid.`** — if you're running the command from **Git Bash** (MSYS), its automatic Unix-path conversion silently rewrites a leading-`/` argument like `--path /api/v1/webhooks/github` into something like `C:/Program Files/Git/api/v1/webhooks/github`, which then fails URL validation. Run the Smee command from PowerShell or `cmd.exe` instead (verified working there), or, if you must use Git Bash, disable the conversion for that one call: `MSYS_NO_PATHCONV=1 npx smee-client@latest --url ... --path /api/v1/webhooks/github --port 8000`.
