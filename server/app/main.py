@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.api.v1.router import api_router
+from app.api.ws.analysis_progress import router as ws_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -48,6 +49,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 app.include_router(api_router)
+# No `/api/v1` prefix — the WS path is a bare `/ws/analysis-runs/{id}` per
+# the plan doc, registered directly on `app` rather than through `api_router`.
+app.include_router(ws_router)
 
 
 @app.get("/api/v1/health")
