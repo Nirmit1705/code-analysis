@@ -1,0 +1,377 @@
+"""`GET /repos/{id}/dashboard` (Phase 6.3): the latest completed run's
+counts, a computed `health_metrics[]`, real `recent_commits[]`, and an
+always-empty `ai_insights[]`.
+
+No shared prefix on `router` (matches `analysis.py`'s own `router` — this
+file has exactly one route, but the convention throughout this codebase's
+`api/v1/*.py` is per-file `APIRouter()`s without a common prefix, composed
+under `/api/v1` by `router.py`).
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.analysis.debt import DebtIssueType, DebtSeverity
+from app.analysis.language_detect import Language
+from app.api.deps import get_current_user, get_db
+from app.models.analysis_run import AnalysisRun
+from app.models.debt_issue import DebtIssue
+from app.models.file import File
+from app.models.repository import Repository
+from app.models.symbol import Symbol
+from app.models.user import User
+from app.schemas.dashboard import (
+    CommitImpact,
+    DashboardRead,
+    HealthMetric,
+    HealthMetricKey,
+    HealthTone,
+    LanguageBreakdown,
+    RecentCommit,
+    RepoStats,
+)
+from app.services import analysis_read_service, github_service, repo_service
+from app.services.github_auth_service import GitHubAuthError, get_installation_token_for_user
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["dashboard"])
+
+# Bounds the "recent commits" panel's own live-GitHub cost: one `list_commits`
+# call plus up to this many per-commit `get_commit` lookups (for `components`
+# enrichment) — the "~9 sequential live GitHub calls per load" the plan
+# accepts as this endpoint's known latency tradeoff (see module docstring
+# below `_build_recent_commits`). If this proves too slow in real use, the
+# pre-approved fallback (`docs/PHASE_6_PLAN.md` 6.3) is dropping per-commit
+# enrichment (`components: []`), not lowering this further or paginating.
+RECENT_COMMITS_LIMIT = 8
+
+# Duplicated small private weight table, matching this codebase's
+# established "duplicate small private constants rather than import them"
+# convention (see `app/analysis/debt.py`'s own `_SEVERITY_WEIGHT` — this is
+# the exact same table, deliberately not imported: `debt.py`'s is private
+# by convention (leading underscore) and this endpoint's use of it is
+# conceptually a different thing — an MVP UI health-score weighting, not
+# the debt engine's own aggregate-score weighting — even though the numbers
+# happen to match today).
+_SEVERITY_WEIGHT: dict[DebtSeverity, float] = {
+    DebtSeverity.LOW: 1.0,
+    DebtSeverity.MEDIUM: 2.0,
+    DebtSeverity.HIGH: 3.0,
+    DebtSeverity.CRITICAL: 5.0,
+}
+
+_HEALTH_METRIC_LABELS: dict[HealthMetricKey, str] = {
+    "architecture": "Architecture Health",
+    "quality": "Code Quality",
+    "dependency": "Dependency Health",
+    "docs": "Documentation Coverage",
+    "debt": "Technical Debt",
+}
+_HEALTH_METRIC_ORDER: list[HealthMetricKey] = ["architecture", "quality", "dependency", "docs", "debt"]
+
+_LANGUAGE_DISPLAY_NAMES: dict[Language, str] = {
+    Language.JAVASCRIPT: "JavaScript",
+    Language.TYPESCRIPT: "TypeScript",
+    Language.TSX: "TSX",
+    Language.PYTHON: "Python",
+    Language.JAVA: "Java",
+}
+
+
+# Duplicated from `app/api/v1/github.py`/`analysis.py`'s own module-private
+# helpers of the same shape, rather than imported — see `analysis.py`'s own
+# docstring for why this codebase's convention is to duplicate rather than
+# reach into another module's underscore-prefixed functions.
+def _installation_token_or_400(current_user: User) -> str:
+    try:
+        return get_installation_token_for_user(current_user)
+    except GitHubAuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def _repository_or_404(db: Session, repository_id: uuid.UUID, current_user: User) -> Repository:
+    repository = repo_service.get_repository_for_user(db, repository_id, current_user.id)
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+    return repository
+
+
+@router.get("/repos/{repository_id}/dashboard", response_model=DashboardRead)
+def get_dashboard(
+    repository_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DashboardRead:
+    """Aggregates the latest completed run's facts into the Dashboard
+    screen's one payload. Returns `analyzed=False` (no other field
+    populated) when the repository has never completed an analysis — a
+    defined "not analyzed" response, not a broken empty aggregate."""
+    repository = _repository_or_404(db, repository_id, current_user)
+
+    current_run = analysis_read_service.get_latest_completed_run(db, repository.id)
+    if current_run is None:
+        return DashboardRead(analyzed=False)
+
+    previous_run = analysis_read_service.get_previous_completed_run(
+        db, repository.id, current_run.completed_at
+    )
+
+    token = _installation_token_or_400(current_user)
+
+    return DashboardRead(
+        analyzed=True,
+        analysis_run_id=current_run.id,
+        branch=current_run.branch,
+        commit_sha=current_run.commit_sha,
+        completed_at=current_run.completed_at,
+        stats=_build_stats(db, current_run, repository, token),
+        languages=_build_languages(db, current_run.id),
+        health_metrics=_compute_health_metrics(db, current_run=current_run, previous_run=previous_run),
+        recent_commits=_build_recent_commits(db, repository, current_run, token),
+        ai_insights=[],
+    )
+
+
+# --- repo.stats ---------------------------------------------------------------
+
+
+def _build_stats(db: Session, current_run: AnalysisRun, repository: Repository, token: str) -> RepoStats:
+    total_loc = db.execute(
+        select(func.coalesce(func.sum(File.loc), 0)).where(File.analysis_run_id == current_run.id)
+    ).scalar_one()
+
+    try:
+        contributor_count = len(github_service.list_contributors(token, repository.owner, repository.name))
+    except github_service.GitHubServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
+        ) from exc
+
+    return RepoStats(
+        files=current_run.file_count,
+        loc=total_loc,
+        modules=current_run.module_count,
+        apis=current_run.api_count,
+        dependencies=current_run.dependency_count,
+        contributors=contributor_count,
+    )
+
+
+# --- languages[] ----------------------------------------------------------------
+
+
+def _build_languages(db: Session, analysis_run_id: uuid.UUID) -> list[LanguageBreakdown]:
+    rows = db.execute(
+        select(File.language, func.sum(File.loc))
+        .where(File.analysis_run_id == analysis_run_id, File.language.is_not(None))
+        .group_by(File.language)
+    ).all()
+    total = sum(loc for _, loc in rows)
+    if total == 0:
+        return []
+    breakdown = [
+        LanguageBreakdown(name=_LANGUAGE_DISPLAY_NAMES[language], loc=loc, pct=round(loc * 100 / total, 1))
+        for language, loc in rows
+    ]
+    return sorted(breakdown, key=lambda entry: entry.loc, reverse=True)
+
+
+# --- health_metrics[] -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _MetricRaw:
+    value: float
+    note: str
+
+
+def _compute_health_metrics(
+    db: Session, *, current_run: AnalysisRun, previous_run: AnalysisRun | None
+) -> list[HealthMetric]:
+    current_raw = _raw_health_metrics(db, current_run.id, current_run.debt_score)
+    previous_raw = (
+        _raw_health_metrics(db, previous_run.id, previous_run.debt_score) if previous_run is not None else None
+    )
+
+    metrics: list[HealthMetric] = []
+    for key in _HEALTH_METRIC_ORDER:
+        value = round(current_raw[key].value)
+        delta = 0 if previous_raw is None else value - round(previous_raw[key].value)
+        tone: HealthTone = "success" if value >= 80 else "warning" if value >= 60 else "danger"
+        metrics.append(
+            HealthMetric(
+                key=key,
+                label=_HEALTH_METRIC_LABELS[key],
+                value=value,
+                delta=delta,
+                tone=tone,
+                note=current_raw[key].note,
+            )
+        )
+    return metrics
+
+
+def _raw_health_metrics(
+    db: Session, analysis_run_id: uuid.UUID, debt_score: float
+) -> dict[HealthMetricKey, _MetricRaw]:
+    """The five metrics' raw (un-rounded, un-floored-for-delta-purposes)
+    values plus `note` text for one run — computed twice per request (once
+    for `current_run`, once for `previous_run` if one exists) so `delta` is
+    an apples-to-apples comparison of the same formula against two real
+    runs, not the current run's value against a stored/cached number."""
+    issue_counts: dict[DebtIssueType, dict[DebtSeverity, int]] = defaultdict(dict)
+    for issue_type, severity, count in db.execute(
+        select(DebtIssue.issue_type, DebtIssue.severity, func.count())
+        .where(DebtIssue.analysis_run_id == analysis_run_id)
+        .group_by(DebtIssue.issue_type, DebtIssue.severity)
+    ).all():
+        issue_counts[issue_type][severity] = count
+
+    def weighted(*types: DebtIssueType) -> float:
+        return sum(
+            _SEVERITY_WEIGHT[severity] * count
+            for t in types
+            for severity, count in issue_counts.get(t, {}).items()
+        )
+
+    def issue_count(*types: DebtIssueType) -> int:
+        return sum(sum(issue_counts.get(t, {}).values()) for t in types)
+
+    symbol_total, symbol_documented = db.execute(
+        select(func.count(), func.count().filter(Symbol.has_docstring.is_(True)))
+        .where(Symbol.analysis_run_id == analysis_run_id)
+    ).one()
+    docs_value = 100.0 if symbol_total == 0 else 100.0 * symbol_documented / symbol_total
+
+    architecture_weighted = weighted(DebtIssueType.CIRCULAR_DEPENDENCY, DebtIssueType.EXCESSIVE_COUPLING)
+    quality_weighted = weighted(DebtIssueType.HIGH_COMPLEXITY, DebtIssueType.LARGE_FILE, DebtIssueType.LARGE_MODULE)
+    dependency_weighted = weighted(DebtIssueType.OUTDATED_DEPENDENCY)
+
+    return {
+        "architecture": _MetricRaw(
+            value=max(0.0, 100.0 - architecture_weighted * 8),
+            note=(
+                f"{issue_count(DebtIssueType.CIRCULAR_DEPENDENCY)} circular dependency issue(s), "
+                f"{issue_count(DebtIssueType.EXCESSIVE_COUPLING)} excessive-coupling issue(s)"
+            ),
+        ),
+        "quality": _MetricRaw(
+            value=max(0.0, 100.0 - quality_weighted * 5),
+            note=(
+                f"{issue_count(DebtIssueType.HIGH_COMPLEXITY)} high-complexity function(s), "
+                f"{issue_count(DebtIssueType.LARGE_FILE, DebtIssueType.LARGE_MODULE)} large file/module issue(s)"
+            ),
+        ),
+        "dependency": _MetricRaw(
+            value=max(0.0, 100.0 - dependency_weighted * 10),
+            note=f"{issue_count(DebtIssueType.OUTDATED_DEPENDENCY)} outdated dependency issue(s)",
+        ),
+        "docs": _MetricRaw(
+            value=max(0.0, docs_value),
+            note=f"{symbol_total - symbol_documented} of {symbol_total} symbols undocumented",
+        ),
+        "debt": _MetricRaw(
+            value=max(0.0, 100.0 - debt_score * 2),
+            note=f"aggregate debt score {debt_score:.1f}",
+        ),
+    }
+
+
+# --- recent_commits[] -------------------------------------------------------------
+
+
+def _build_recent_commits(
+    db: Session, repository: Repository, current_run: AnalysisRun, token: str
+) -> list[RecentCommit]:
+    """Real commit history off the repository's currently-analyzed branch
+    (live GitHub, not frozen to `current_run.commit_sha` — this panel shows
+    recent activity, which may include commits made after the last
+    analysis completed). `components` is deliberately simpler than
+    Architecture's node labels (raw, deduped `File.module` strings
+    intersected against each commit's changed files, per
+    `docs/PHASE_6_PLAN.md` 6.3) — a commit touching a file outside the
+    latest analyzed run's file set (added/removed/renamed since, or
+    ignored by Phase 3's ingestion filters) simply contributes nothing to
+    that commit's `components`, which is an honest reflection of drift
+    between "latest analysis" and "live activity", not a bug.
+
+    Up to `1 + RECENT_COMMITS_LIMIT` sequential live GitHub calls (one
+    `list_commits` plus one `get_commit` per commit, for the `components`
+    enrichment) — the plan's own accepted latency tradeoff for this panel;
+    a single commit's enrichment failing is caught and skipped
+    (`components: []` for that commit only), not treated as a whole-request
+    failure, matching this codebase's established per-item resilience
+    stance (`analysis/pipeline.py`'s per-file catch/log/skip)."""
+    try:
+        gh_commits = github_service.list_commits(
+            token, repository.owner, repository.name, sha=current_run.branch, per_page=RECENT_COMMITS_LIMIT
+        )
+    except github_service.GitHubServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"GitHub error: {exc}"
+        ) from exc
+
+    module_by_path: dict[str, str] = dict(
+        db.execute(
+            select(File.path, File.module).where(File.analysis_run_id == current_run.id)
+        ).all()
+    )
+
+    commits: list[RecentCommit] = []
+    for gh_commit in gh_commits:
+        sha = gh_commit["sha"]
+        commit_info = gh_commit.get("commit", {})
+        message = commit_info.get("message") or ""
+        author_login = (gh_commit.get("author") or {}).get("login")
+        author = author_login or commit_info.get("author", {}).get("name") or "unknown"
+        date = commit_info.get("author", {}).get("date")
+        components = _resolve_commit_components(token, repository, sha, module_by_path)
+        commits.append(
+            RecentCommit(
+                sha=sha,
+                message=message.splitlines()[0] if message else "",
+                author=author,
+                components=components,
+                impact=_impact_tier(len(components)),
+                date=date,
+            )
+        )
+    return commits
+
+
+def _resolve_commit_components(
+    token: str, repository: Repository, sha: str, module_by_path: dict[str, str]
+) -> list[str]:
+    try:
+        detail = github_service.get_commit(token, repository.owner, repository.name, sha)
+    except github_service.GitHubServiceError as exc:
+        logger.warning("skipping component enrichment for commit %s: %s", sha, exc)
+        return []
+    changed_paths = (f.get("filename") for f in detail.get("files") or [])
+    modules = {module_by_path[path] for path in changed_paths if path in module_by_path}
+    return sorted(modules)
+
+
+def _impact_tier(component_count: int) -> CommitImpact:
+    """A commit's "impact" is read as breadth across the architecture — how
+    many distinct modules it touches — rather than raw lines changed: a
+    small fix to an auth/security-sensitive module reads as higher impact
+    than a large single-file refactor, matching the intent `repo-data.ts`'s
+    own mock data implies. A documented MVP heuristic (this endpoint's own,
+    not dictated verbatim by `docs/PHASE_6_PLAN.md`, which doesn't specify
+    one) — revisit if real usage shows it needs real line-level signal
+    instead."""
+    if component_count >= 3:
+        return "high"
+    if component_count == 2:
+        return "medium"
+    return "low"

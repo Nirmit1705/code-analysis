@@ -186,6 +186,28 @@ def get_commit(installation_token: str, owner: str, repo: str, sha: str) -> dict
     ).json()
 
 
+def list_commits(
+    installation_token: str, owner: str, repo: str, *, sha: str | None = None, per_page: int = 10
+) -> list[dict[str, Any]]:
+    """GET /repos/{owner}/{repo}/commits — the most recent commits reachable
+    from `sha` (a branch name, tag, or commit SHA; GitHub's default branch
+    if omitted). A single bounded page, deliberately **not** run through
+    `_get_all_pages` (unlike `list_contributors` below) — a dashboard's
+    "recent commits" panel (Phase 6.3) wants a small, recent, bounded list,
+    not a full paginated commit history."""
+    params: dict[str, Any] = {"per_page": per_page}
+    if sha:
+        params["sha"] = sha
+    return _request("GET", f"/repos/{owner}/{repo}/commits", token=installation_token, params=params).json()
+
+
+def list_contributors(installation_token: str, owner: str, repo: str) -> list[dict[str, Any]]:
+    """GET /repos/{owner}/{repo}/contributors — every contributor, paged via
+    `_get_all_pages` since Phase 6.3's `repo.stats.contributors` wants an
+    accurate total count, not just the first page."""
+    return _get_all_pages(f"/repos/{owner}/{repo}/contributors", token=installation_token)
+
+
 def get_file_contents(
     installation_token: str, owner: str, repo: str, path: str, ref: str | None = None
 ) -> dict[str, Any]:
