@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -21,10 +21,18 @@ import {
 } from "lucide-react";
 
 import { PRODUCT } from "@/lib/repo-data";
-import { Dot, Ring, StatCell, Tag } from "@/components/ui-kit";
+import { Dot, Ring, StatCell, Tag, type Tone } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
-import { isAuthenticated } from "@/lib/auth";
+import { getAccessToken, isAuthenticated } from "@/lib/auth";
 import { setActiveRepositoryId } from "@/lib/active-repo";
+import {
+  ANALYSIS_RUN_STAGES,
+  useAnalysisRun,
+  useAnalysisProgressSocket,
+  useCreateAnalysisRun,
+  type AnalysisRunRead,
+  type AnalysisRunStatus,
+} from "@/lib/queries/analysis";
 import {
   useGithubExchange,
   useGithubInstall,
@@ -87,15 +95,28 @@ function formatPushedAt(pushedAt: string | null): string {
 
 const steps = ["Welcome", "GitHub", "Repository", "Branch", "Analysis", "Complete"];
 
-const stages = [
-  { label: "Repository cloned", detail: "184 MB · shallow clone" },
-  { label: "Project structure detected", detail: "monorepo · 4 workspaces" },
-  { label: "Files indexed", detail: "3,184 files · 412,907 LOC" },
-  { label: "Dependencies extracted", detail: "264 packages · 1,912 internal edges" },
-  { label: "Building architecture graph", detail: "47 modules · 9 components" },
-  { label: "Generating embeddings", detail: "18,402 chunks" },
-  { label: "Running technical debt analysis", detail: "duplication · complexity · cycles" },
-];
+// Human-readable phrasing of each real `AnalysisRunStatus` value the
+// checklist below renders — the label text is invented, but the set and
+// order of stages it labels is not (see `ANALYSIS_RUN_STAGES`'s own doc).
+const STAGE_LABELS: Record<(typeof ANALYSIS_RUN_STAGES)[number], string> = {
+  queued: "Queued",
+  cloning: "Cloning repository",
+  parsing: "Parsing files",
+  analyzing: "Analyzing code",
+  building_graph: "Building architecture graph",
+  indexing: "Generating embeddings",
+  generating_insights: "Running technical debt analysis",
+};
+
+// Simple MVP tiering directly over the raw `debt_score` sum, distinct from
+// (and cruder than) the real Technical-Debt health formula Phase 6.3/6.4
+// compute from it — this screen only needs a rough tier, not the finished
+// health score, per the Phase 6 plan's own note for this step.
+function debtTier(score: number): { label: string; tone: Tone } {
+  if (score <= 20) return { label: "Low debt", tone: "success" };
+  if (score <= 50) return { label: "Moderate debt", tone: "warning" };
+  return { label: "High debt", tone: "danger" };
+}
 
 function Progress({ step }: { step: number }) {
   return (
@@ -137,6 +158,7 @@ function Onboarding() {
   const [repository, setRepository] = useState<RepositoryRead | null>(null);
   const [selectedBranchName, setSelectedBranchName] = useState<string | null>(null);
   const [confirmedBranch, setConfirmedBranch] = useState<BranchRead | null>(null);
+  const [completedRun, setCompletedRun] = useState<AnalysisRunRead | null>(null);
   const navigate = useNavigate();
   const search = Route.useSearch();
 
@@ -510,12 +532,20 @@ function Onboarding() {
           </div>
         ) : null}
 
-        {step === 4 ? (
+        {step === 4 && repository ? (
           <AnalysisStep
-            onDone={() => setStep(5)}
+            repositoryId={repository.id}
+            onDone={(run) => {
+              setCompletedRun(run);
+              setStep(5);
+            }}
             branch={confirmedBranch?.name ?? selectedBranchName ?? ""}
-            target={repository?.full_name ?? selectedRepo?.full_name ?? ""}
+            target={repository.full_name}
           />
+        ) : step === 4 ? (
+          <div className="panel ambient-panel p-7 text-center text-[13px] text-muted-foreground">
+            No repository selected — go back and pick one first.
+          </div>
         ) : null}
 
         {step === 5 ? (
@@ -533,37 +563,45 @@ function Onboarding() {
 
             <div className="mt-6 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
               <div className="bg-surface">
-                <StatCell label="Files analyzed" value="3,184" sub="412,907 LOC" />
+                <StatCell
+                  label="Files analyzed"
+                  value={(completedRun?.file_count ?? 0).toLocaleString()}
+                />
               </div>
               <div className="bg-surface">
-                <StatCell label="Dependencies" value="264" sub="1,912 internal edges" />
+                <StatCell
+                  label="Dependencies"
+                  value={(completedRun?.dependency_count ?? 0).toLocaleString()}
+                />
               </div>
               <div className="bg-surface">
-                <StatCell label="Modules detected" value="47" sub="9 components" />
+                <StatCell
+                  label="Modules detected"
+                  value={(completedRun?.module_count ?? 0).toLocaleString()}
+                />
               </div>
               <div className="bg-surface">
-                <StatCell label="APIs detected" value="118" sub="24 public" />
+                <StatCell
+                  label="APIs detected"
+                  value={(completedRun?.api_count ?? 0).toLocaleString()}
+                />
               </div>
             </div>
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4">
-                <Ring value={82} tone="success" />
-                <div>
-                  <p className="text-[13px] font-medium">Architecture health</p>
-                  <p className="text-[11.5px] text-muted-foreground">
-                    3 boundary violations detected
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4">
-                <Ring value={72} tone="warning" label="72" />
-                <div>
-                  <p className="text-[13px] font-medium">Technical debt</p>
-                  <p className="text-[11.5px] text-muted-foreground">
-                    Moderate · 6 prioritized issues
-                  </p>
-                </div>
+            {/* Only a rough debt tier here, deliberately — the real
+                Architecture/Technical-Debt health-ring formulas don't exist
+                until Phase 6.3/6.4, which is when this panel's ring(s) get
+                finalized (see the Phase 6 plan's 6.2 section). */}
+            <div className="mt-3 flex items-center gap-3 rounded-lg border border-border bg-surface p-4">
+              <Tag tone={debtTier(completedRun?.debt_score ?? 0).tone}>
+                {debtTier(completedRun?.debt_score ?? 0).label}
+              </Tag>
+              <div>
+                <p className="text-[13px] font-medium">Technical debt</p>
+                <p className="text-[11.5px] text-muted-foreground">
+                  Debt score {(completedRun?.debt_score ?? 0).toFixed(1)} · full health scoring
+                  lands with the Dashboard
+                </p>
               </div>
             </div>
 
@@ -580,27 +618,154 @@ function Onboarding() {
   );
 }
 
+type AnalysisStage = (typeof ANALYSIS_RUN_STAGES)[number];
+type AnalysisOutcome = "in_progress" | "completed" | "failed";
+
 function AnalysisStep({
+  repositoryId,
   onDone,
   branch,
   target,
 }: {
-  onDone: () => void;
+  repositoryId: string;
+  onDone: (run: AnalysisRunRead) => void;
   branch: string;
   target: string;
 }) {
-  const [active, setActive] = useState(0);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [progressStage, setProgressStage] = useState<AnalysisStage>("queued");
+  const [outcome, setOutcome] = useState<AnalysisOutcome>("in_progress");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Forces a re-render each second so the elapsed-time readout below ticks;
+  // the actual value is recomputed from the run's real `started_at` on every
+  // render, not accumulated locally.
+  const [, tick] = useState(0);
+  // Guards the mount effect below against firing twice — confirmed during
+  // manual verification that without this, React's dev-mode Strict Mode
+  // double-invoke (mount → cleanup → mount again, same component instance)
+  // queues two real `POST /analysis-runs` calls and two real Celery runs
+  // for one "Start analysis" click. A ref survives that simulated
+  // remount (unlike component-scoped state), so this is the standard fix
+  // for a mount effect with a real, non-idempotent side effect.
+  const hasStartedRef = useRef(false);
+
+  const createRun = useCreateAnalysisRun(repositoryId);
+  const runQuery = useAnalysisRun(runId);
+  const { lastEvent } = useAnalysisProgressSocket(runId, getAccessToken());
+
+  // `mutateAsync` + a plain try/catch, not `.mutate(vars, {onSuccess,
+  // onError})` — confirmed during manual verification that the per-call
+  // callback form silently never fired here (the mutation's own promise
+  // resolved with the real created run, but `onSuccess` was never invoked),
+  // while `mutateAsync`'s returned promise is a plain, reliably-awaitable
+  // JS promise unaffected by whatever internal observer/subscription
+  // timing dropped the callback.
+  const startAnalysis = async () => {
+    setOutcome("in_progress");
+    setErrorMessage(null);
+    setProgressStage("queued");
+    setRunId(null);
+    try {
+      const run = await createRun.mutateAsync();
+      setRunId(run.id);
+    } catch {
+      toast.error("Couldn't start the analysis — please try again.");
+    }
+  };
+
+  // Kick off the run exactly once, on mount.
+  useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+    startAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function applyStatus(status: AnalysisRunStatus, message: string | null) {
+    if (status === "completed") {
+      setOutcome("completed");
+      return;
+    }
+    if (status === "failed") {
+      setOutcome("failed");
+      if (message) setErrorMessage(message);
+      return;
+    }
+    // Whichever of the REST fallback or the WS relay is furthest along
+    // wins — both report the same real progression, so this only ever
+    // advances, never regresses.
+    setProgressStage((prev) =>
+      ANALYSIS_RUN_STAGES.indexOf(status) >= ANALYSIS_RUN_STAGES.indexOf(prev) ? status : prev,
+    );
+  }
 
   useEffect(() => {
-    if (active >= stages.length) {
-      const t = setTimeout(onDone, 700);
+    if (runQuery.data) applyStatus(runQuery.data.status, runQuery.data.error_message);
+  }, [runQuery.data]);
+
+  useEffect(() => {
+    if (lastEvent) applyStatus(lastEvent.status, lastEvent.error_message);
+  }, [lastEvent]);
+
+  // The WS event only ever carries `{status}`, never the real counts (see
+  // `AnalysisProgressEvent`) — fetch the full row the instant a terminal
+  // status is observed rather than waiting for the REST fallback's own
+  // poll interval to come back around.
+  useEffect(() => {
+    if (outcome !== "in_progress" && runId) void runQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome, runId]);
+
+  useEffect(() => {
+    if (outcome === "completed" && runQuery.data?.status === "completed") {
+      const t = setTimeout(() => onDone(runQuery.data!), 700);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setActive((a) => a + 1), active === 0 ? 700 : 1100);
-    return () => clearTimeout(t);
-  }, [active, onDone]);
+    return undefined;
+  }, [outcome, runQuery.data, onDone]);
 
-  const pct = Math.min(100, Math.round((active / stages.length) * 100));
+  useEffect(() => {
+    if (outcome !== "in_progress") return undefined;
+    const interval = setInterval(() => tick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [outcome]);
+
+  const startedAt = createRun.data?.started_at ?? runQuery.data?.started_at;
+  const elapsedSeconds = startedAt
+    ? Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000))
+    : 0;
+
+  const stageIndex = ANALYSIS_RUN_STAGES.indexOf(progressStage);
+  const pct =
+    outcome === "completed" ? 100 : Math.round((stageIndex / ANALYSIS_RUN_STAGES.length) * 100);
+
+  if (outcome === "failed") {
+    return (
+      <div className="panel ambient-panel p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-[20px] font-semibold tracking-tight">Analysis failed</h1>
+            <p className="mt-1.5 font-mono text-[12px] text-subtle">
+              {target} · {branch}
+            </p>
+          </div>
+          <Ring value={pct} size={64} tone="danger" label="!" />
+        </div>
+
+        <div className="mt-6 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-3 text-[12.5px] text-danger">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>{errorMessage ?? "The analysis run failed for an unknown reason."}</span>
+        </div>
+
+        <button
+          onClick={startAnalysis}
+          className="focus-ring mt-5 flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2.5 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)]"
+        >
+          Retry analysis <ArrowRight className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="panel ambient-panel p-7">
@@ -622,12 +787,12 @@ function AnalysisStep({
       </div>
 
       <ul className="mt-6 space-y-1">
-        {stages.map((s, i) => {
-          const done = i < active;
-          const running = i === active;
+        {ANALYSIS_RUN_STAGES.map((stageKey, i) => {
+          const done = i < stageIndex || outcome === "completed";
+          const running = !done && i === stageIndex;
           return (
             <li
-              key={s.label}
+              key={stageKey}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 transition-colors",
                 running && "bg-violet/[0.08]",
@@ -646,29 +811,18 @@ function AnalysisStep({
                   done ? "text-muted-foreground" : running ? "text-foreground" : "text-subtle",
                 )}
               >
-                {s.label}
-              </span>
-              <span className="ml-auto font-mono text-[11px] text-subtle">
-                {done || running ? s.detail : "queued"}
+                {STAGE_LABELS[stageKey]}
               </span>
             </li>
           );
         })}
       </ul>
 
-      <div className="mt-6 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-4">
-        <div className="bg-surface">
-          <StatCell label="Files indexed" value={active >= 3 ? "3,184" : "1,204"} />
-        </div>
-        <div className="bg-surface">
-          <StatCell label="Symbols resolved" value={active >= 4 ? "41,776" : "18,220"} />
-        </div>
-        <div className="bg-surface">
-          <StatCell label="Graph nodes" value={active >= 5 ? "47" : "12"} />
-        </div>
-        <div className="bg-surface">
-          <StatCell label="Elapsed" value={`${(active * 34 + 12).toString()}s`} />
-        </div>
+      <div className="mt-6 flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3">
+        <span className="font-mono text-[11px] text-subtle">
+          {runId ? `Run ${runId.slice(0, 8)}` : "Starting…"}
+        </span>
+        <span className="font-mono text-[11px] text-subtle">Elapsed {elapsedSeconds}s</span>
       </div>
     </div>
   );
