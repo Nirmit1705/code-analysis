@@ -1,49 +1,133 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RefreshCw, Sparkles, GitBranch, ArrowUpRight, ChevronsUpDown } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 import { ArchGraph } from "@/components/arch-graph";
-import { AiNote, Panel, PanelHeader, Ring, Sparkline, StatCell, Tag } from "@/components/ui-kit";
-import { aiInsights, healthMetrics, recentCommits, repo } from "@/lib/repo-data";
+import { Panel, PanelHeader, Ring, StatCell, Tag } from "@/components/ui-kit";
+import { useActiveRepositoryId } from "@/lib/active-repo";
+import { useDashboard, type DashboardRead } from "@/lib/queries/dashboard";
+import { useRepositories } from "@/lib/queries/repos";
 
 export const Route = createFileRoute("/app/")({
   head: () => ({
     meta: [
       { title: "Project Overview — Substrate" },
-      { name: "description", content: "Project health, architecture snapshot, recent changes and AI insights for the analyzed repository." },
+      {
+        name: "description",
+        content:
+          "Project health, architecture snapshot, recent changes and AI insights for the analyzed repository.",
+      },
       { property: "og:title", content: "Project Overview — Substrate" },
-      { property: "og:description", content: "Architecture health, code quality, dependency health and technical debt at a glance." },
+      {
+        property: "og:description",
+        content:
+          "Architecture health, code quality, dependency health and technical debt at a glance.",
+      },
     ],
   }),
   component: Overview,
 });
 
-const trends: Record<string, number[]> = {
-  architecture: [71, 74, 73, 78, 79, 81, 82],
-  quality: [80, 79, 78, 78, 77, 78, 76],
-  dependency: [78, 76, 74, 70, 69, 70, 64],
-  docs: [22, 24, 27, 30, 33, 38, 41],
-  debt: [58, 61, 60, 65, 68, 70, 72],
-};
+// Backend `languages[]` (Phase 6.3) deliberately has no `color` field —
+// display colors are a frontend concern (same stance Architecture's own
+// backend takes on layout). Cycled by index; `languages` arrives sorted
+// loc-desc, so the largest language always gets the first color.
+const LANGUAGE_COLORS = [
+  "var(--info)",
+  "var(--violet)",
+  "var(--cyan)",
+  "var(--magenta)",
+  "var(--warning)",
+];
 
 function Overview() {
+  const activeRepositoryId = useActiveRepositoryId();
+  const repositories = useRepositories();
+  const activeRepository = repositories.data?.find((r) => r.id === activeRepositoryId) ?? null;
+  const dashboard = useDashboard(activeRepositoryId);
+
+  const repoDisplayName = repositories.isLoading
+    ? "Loading…"
+    : (activeRepository?.full_name ?? "No repository connected");
+
+  // `repositories.isLoading` is checked *before* `activeRepositoryId === null`
+  // — while the repositories list is still resolving, `activeRepositoryId`
+  // is legitimately still `null` too (nothing to fall back to yet), and
+  // that's a loading state, not "no repository connected". Also gates
+  // `useDashboard` from being read as errored below: a `null` repository id
+  // makes that query `enabled: false`, which TanStack Query reports as
+  // `isLoading: false, isError: false, data: undefined` — indistinguishable
+  // from "loaded successfully with no data" unless this is checked first.
+  const body = repositories.isLoading ? (
+    <Panel>
+      <p className="p-8 text-center text-[13px] text-subtle">Loading…</p>
+    </Panel>
+  ) : activeRepositoryId === null ? (
+    <Panel>
+      <div className="p-10 text-center">
+        <p className="text-[13px] text-subtle">No repository connected yet.</p>
+        <Link
+          to="/onboarding"
+          className="focus-ring mt-2 inline-block text-[12.5px] text-violet-soft hover:underline"
+        >
+          Connect a repository
+        </Link>
+      </div>
+    </Panel>
+  ) : dashboard.isLoading ? (
+    <Panel>
+      <p className="p-8 text-center text-[13px] text-subtle">Loading dashboard…</p>
+    </Panel>
+  ) : dashboard.isError || !dashboard.data ? (
+    <Panel>
+      <p className="p-8 text-center text-[13px] text-danger">Failed to load the dashboard.</p>
+    </Panel>
+  ) : !dashboard.data.analyzed ? (
+    <Panel>
+      <div className="p-10 text-center">
+        <p className="text-[13px] text-subtle">This repository hasn't been analyzed yet.</p>
+        <Link
+          to="/onboarding"
+          className="focus-ring mt-2 inline-block text-[12.5px] text-violet-soft hover:underline"
+        >
+          Run the first analysis
+        </Link>
+      </div>
+    </Panel>
+  ) : (
+    <DashboardBody data={dashboard.data} />
+  );
+
   return (
     <div className="mx-auto max-w-[1440px] space-y-3 p-4">
       <header className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="flex items-center gap-2 font-mono text-[15px] font-medium">
-            {repo.name}
-            <Tag tone="warning">private</Tag>
+            {repoDisplayName}
+            {activeRepository?.private ? <Tag tone="warning">private</Tag> : null}
           </h1>
           <p className="mt-1 flex items-center gap-2 text-[12px] text-subtle">
-            <span className="flex items-center gap-1 font-mono">
-              <GitBranch className="size-3" /> {repo.branch} · a3f91c2
-            </span>
-            · last analyzed {repo.lastAnalyzed}
+            {!dashboard.data ? (
+              <span>—</span>
+            ) : dashboard.data.analyzed ? (
+              <>
+                <span className="flex items-center gap-1 font-mono">
+                  <GitBranch className="size-3" /> {dashboard.data.branch} ·{" "}
+                  {dashboard.data.commit_sha?.slice(0, 7)}
+                </span>
+                · last analyzed{" "}
+                {dashboard.data.completed_at
+                  ? formatDistanceToNow(new Date(dashboard.data.completed_at), { addSuffix: true })
+                  : "just now"}
+              </>
+            ) : (
+              <span>not yet analyzed</span>
+            )}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button className="focus-ring flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] hover:border-border-strong">
-            <ChevronsUpDown className="size-3.5 text-subtle" /> {repo.branch}
+            <ChevronsUpDown className="size-3.5 text-subtle" /> {dashboard.data?.branch ?? "branch"}
           </button>
           <button className="focus-ring flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] hover:border-border-strong">
             <RefreshCw className="size-3.5 text-subtle" /> Re-analyze
@@ -57,9 +141,19 @@ function Overview() {
         </div>
       </header>
 
+      {body}
+    </div>
+  );
+}
+
+function DashboardBody({ data }: { data: DashboardRead }) {
+  const stats = data.stats!;
+
+  return (
+    <>
       {/* HEALTH */}
       <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border md:grid-cols-3 xl:grid-cols-5">
-        {healthMetrics.map((m) => (
+        {data.health_metrics.map((m) => (
           <div key={m.key} className="bg-surface p-3.5">
             <div className="flex items-start justify-between gap-2">
               <p className="label-xs">{m.label}</p>
@@ -70,9 +164,8 @@ function Overview() {
                 {m.delta}
               </span>
             </div>
-            <div className="mt-2.5 flex items-center justify-between gap-2">
+            <div className="mt-2.5 flex items-center gap-2">
               <Ring value={m.value} tone={m.tone} size={48} />
-              <Sparkline points={trends[m.key] ?? [1, 2]} tone={m.tone} width={72} height={26} />
             </div>
             <p className="mt-2 font-mono text-[11px] text-subtle">{m.note}</p>
           </div>
@@ -80,7 +173,7 @@ function Overview() {
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1.55fr_1fr]">
-        {/* ARCH SNAPSHOT */}
+        {/* ARCH SNAPSHOT — still the mock graph; real data lands in 6.5/6.6 */}
         <Panel className="overflow-hidden">
           <PanelHeader
             title="Architecture snapshot"
@@ -114,54 +207,66 @@ function Overview() {
           </div>
         </Panel>
 
-        {/* AI INSIGHTS + STATS */}
+        {/* AI INSIGHTS (always empty until Phase 8) + STATS */}
         <div className="space-y-3">
           <Panel>
-            <PanelHeader title="AI insights" subtitle="generated from the current analysis" icon={<Sparkles className="size-3.5" />} />
-            <div className="space-y-2 p-3">
-              {aiInsights.map((i) => (
-                <div key={i.title} className="rounded-md border border-border bg-surface-2/40 p-3">
-                  <p className="flex items-center gap-2 text-[12.5px] font-medium">
-                    <span
-                      className="size-1.5 rounded-full"
-                      style={{
-                        background:
-                          i.tone === "danger" ? "var(--danger)" : i.tone === "warning" ? "var(--warning)" : "var(--info)",
-                      }}
-                    />
-                    {i.title}
-                  </p>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">{i.body}</p>
-                </div>
-              ))}
+            <PanelHeader
+              title="AI insights"
+              subtitle="generated from the current analysis"
+              icon={<Sparkles className="size-3.5" />}
+            />
+            <div className="p-3">
+              <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-4 text-center text-[12px] text-subtle">
+                AI-generated insights will appear here once the assistant is wired up.
+              </p>
             </div>
           </Panel>
 
           <Panel>
             <PanelHeader title="Repository statistics" />
             <div className="grid grid-cols-3 divide-x divide-y divide-border">
-              <StatCell label="Files" value={repo.stats.files.toLocaleString()} />
-              <StatCell label="Lines of code" value="412.9k" />
-              <StatCell label="Modules" value={repo.stats.modules} />
-              <StatCell label="APIs" value={repo.stats.apis} />
-              <StatCell label="Dependencies" value={repo.stats.dependencies} />
-              <StatCell label="Contributors" value={repo.stats.contributors} />
+              <StatCell label="Files" value={stats.files.toLocaleString()} />
+              <StatCell label="Lines of code" value={stats.loc.toLocaleString()} />
+              <StatCell label="Modules" value={stats.modules.toLocaleString()} />
+              <StatCell label="APIs" value={stats.apis.toLocaleString()} />
+              <StatCell label="Dependencies" value={stats.dependencies.toLocaleString()} />
+              <StatCell label="Contributors" value={stats.contributors.toLocaleString()} />
             </div>
             <div className="border-t border-border p-3">
               <p className="label-xs mb-2">Language distribution</p>
-              <div className="flex h-1.5 overflow-hidden rounded-full">
-                {repo.languages.map((l) => (
-                  <span key={l.name} style={{ width: `${l.pct}%`, background: l.color }} />
-                ))}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-3">
-                {repo.languages.map((l) => (
-                  <span key={l.name} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span className="size-1.5 rounded-full" style={{ background: l.color }} />
-                    {l.name} <span className="font-mono text-subtle">{l.pct}%</span>
-                  </span>
-                ))}
-              </div>
+              {data.languages.length > 0 ? (
+                <>
+                  <div className="flex h-1.5 overflow-hidden rounded-full">
+                    {data.languages.map((l, i) => (
+                      <span
+                        key={l.name}
+                        style={{
+                          width: `${l.pct}%`,
+                          background: LANGUAGE_COLORS[i % LANGUAGE_COLORS.length],
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {data.languages.map((l, i) => (
+                      <span
+                        key={l.name}
+                        className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                      >
+                        <span
+                          className="size-1.5 rounded-full"
+                          style={{ background: LANGUAGE_COLORS[i % LANGUAGE_COLORS.length] }}
+                        />
+                        {l.name} <span className="font-mono text-subtle">{l.pct}%</span>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-[11px] text-subtle">
+                  No detected-language files in the latest analysis.
+                </p>
+              )}
             </div>
           </Panel>
         </div>
@@ -173,51 +278,70 @@ function Overview() {
           title="Recent changes"
           subtitle="architecture impact per commit"
           actions={
-            <Link to="/app/compare" className="focus-ring rounded-sm px-1.5 py-1 text-[11.5px] text-violet-soft hover:bg-violet/12">
+            <Link
+              to="/app/compare"
+              className="focus-ring rounded-sm px-1.5 py-1 text-[11.5px] text-violet-soft hover:bg-violet/12"
+            >
               Compare branches
             </Link>
           }
         />
-        <table className="w-full text-left">
-          <thead>
-            <tr className="border-b border-border">
-              {["Commit", "Message", "Author", "Changed components", "Impact", "Date"].map((h) => (
-                <th key={h} className="label-xs px-4 py-2 font-medium">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {recentCommits.map((c) => (
-              <tr key={c.sha} className="transition-colors hover:bg-surface-2/60">
-                <td className="px-4 py-2.5 font-mono text-[12px] text-violet-soft">{c.sha}</td>
-                <td className="max-w-[340px] truncate px-4 py-2.5 text-[12.5px]">{c.message}</td>
-                <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{c.author}</td>
-                <td className="px-4 py-2.5">
-                  <span className="flex flex-wrap gap-1">
-                    {c.components.map((m) => (
-                      <Tag key={m}>{m}</Tag>
-                    ))}
-                  </span>
-                </td>
-                <td className="px-4 py-2.5">
-                  <Tag tone={c.impact === "high" ? "danger" : c.impact === "medium" ? "warning" : "success"}>
-                    {c.impact}
-                  </Tag>
-                </td>
-                <td className="px-4 py-2.5 font-mono text-[11.5px] text-subtle">{c.date}</td>
+        {data.recent_commits.length > 0 ? (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-border">
+                {["Commit", "Message", "Author", "Changed components", "Impact", "Date"].map(
+                  (h) => (
+                    <th key={h} className="label-xs px-4 py-2 font-medium">
+                      {h}
+                    </th>
+                  ),
+                )}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data.recent_commits.map((c) => (
+                <tr key={c.sha} className="transition-colors hover:bg-surface-2/60">
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-violet-soft">
+                    {c.sha.slice(0, 7)}
+                  </td>
+                  <td className="max-w-[340px] truncate px-4 py-2.5 text-[12.5px]">{c.message}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">
+                    {c.author}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="flex flex-wrap gap-1">
+                      {c.components.length > 0 ? (
+                        c.components.map((m) => <Tag key={m}>{m}</Tag>)
+                      ) : (
+                        <span className="text-[11px] text-subtle">—</span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Tag
+                      tone={
+                        c.impact === "high"
+                          ? "danger"
+                          : c.impact === "medium"
+                            ? "warning"
+                            : "success"
+                      }
+                    >
+                      {c.impact}
+                    </Tag>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-[11.5px] text-subtle">
+                    {formatDistanceToNow(new Date(c.date), { addSuffix: true })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="p-4 text-[12px] text-subtle">No recent commits found.</p>
+        )}
       </Panel>
-
-      <AiNote title="Suggested next step">
-        Dependency health dropped 6 points this week — <span className="mono text-violet-soft">axios@0.27.2</span> and{" "}
-        <span className="mono text-violet-soft">jsonwebtoken@8.5.1</span> both carry known CVEs and are imported by 13
-        modules. Run impact analysis on <span className="mono text-violet-soft">jwt.strategy.ts</span> before upgrading.
-      </AiNote>
-    </div>
+    </>
   );
 }
