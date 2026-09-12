@@ -20,9 +20,12 @@ import {
   Command,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
-import { PRODUCT, repo } from "@/lib/repo-data";
+import { PRODUCT } from "@/lib/repo-data";
+import { useActiveRepositoryId } from "@/lib/active-repo";
+import { useRepositories } from "@/lib/queries/repos";
 import { Dot, KeyHint } from "@/components/ui-kit";
 
 const nav = [
@@ -68,6 +71,17 @@ function Logo() {
 
 export function TopBar() {
   const [open, setOpen] = useState(false);
+  const activeRepositoryId = useActiveRepositoryId();
+  const repositories = useRepositories();
+  const activeRepository = repositories.data?.find((r) => r.id === activeRepositoryId) ?? null;
+  const displayName = repositories.isLoading
+    ? "Loading…"
+    : (activeRepository?.full_name ?? "No repository connected");
+  const lastAnalyzedLabel = activeRepository?.last_completed_analysis_at
+    ? formatDistanceToNow(new Date(activeRepository.last_completed_analysis_at), { addSuffix: true })
+    : "not yet analyzed";
+  const githubConnected = (repositories.data?.length ?? 0) > 0;
+
   return (
     <header className="sticky top-0 z-40 flex h-12 items-center gap-3 border-b border-border bg-background/85 px-3 backdrop-blur-xl">
       <Logo />
@@ -78,26 +92,33 @@ export function TopBar() {
         className="focus-ring flex h-7 items-center gap-2 rounded-md border border-border bg-surface px-2 text-[12px] hover:border-border-strong"
       >
         <Github className="size-3.5 text-muted-foreground" />
-        <span className="font-mono text-[12px]">{repo.name}</span>
+        <span className="font-mono text-[12px]">{displayName}</span>
         <ChevronsUpDown className="size-3 text-subtle" />
       </button>
 
+      {/* Repo-switcher stays a non-functional visual placeholder (Phase 6.1
+          scope note): it now lists the user's *real* connected repositories
+          instead of hardcoded names, but clicking one only closes the menu —
+          there's no multi-repo-switching UI yet (see `@/lib/active-repo`). */}
       {open ? (
         <div className="absolute top-11 left-40 z-50 w-72 rounded-lg border border-border bg-popover p-1 shadow-[var(--shadow-pop)]">
           <p className="label-xs px-2 py-1.5">Connected repositories</p>
-          {["hiresight/hiresight-platform", "hiresight/transcript-worker", "hiresight/design-system"].map((r) => (
+          {(repositories.data ?? []).map((r) => (
             <button
-              key={r}
+              key={r.id}
               onClick={() => setOpen(false)}
               className={cn(
                 "flex w-full items-center justify-between rounded-sm px-2 py-1.5 font-mono text-[12px] hover:bg-surface-2",
-                r === repo.name && "bg-violet/12 text-violet-soft",
+                r.id === activeRepositoryId && "bg-violet/12 text-violet-soft",
               )}
             >
-              {r}
-              {r === repo.name ? <Dot tone="violet" /> : null}
+              {r.full_name}
+              {r.id === activeRepositoryId ? <Dot tone="violet" /> : null}
             </button>
           ))}
+          {repositories.data?.length === 0 ? (
+            <p className="px-2 py-1.5 text-[11.5px] text-subtle">No repositories connected yet.</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -111,12 +132,16 @@ export function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <span className="hidden items-center gap-1.5 rounded-md border border-success/25 bg-success/10 px-2 py-1 text-[11px] text-success lg:flex">
-          <Dot tone="success" pulse /> GitHub connected
-        </span>
-        <span className="hidden font-mono text-[11px] text-subtle xl:inline">
-          analyzed {repo.lastAnalyzed}
-        </span>
+        {githubConnected ? (
+          <span className="hidden items-center gap-1.5 rounded-md border border-success/25 bg-success/10 px-2 py-1 text-[11px] text-success lg:flex">
+            <Dot tone="success" pulse /> GitHub connected
+          </span>
+        ) : null}
+        {activeRepository ? (
+          <span className="hidden font-mono text-[11px] text-subtle xl:inline">
+            analyzed {lastAnalyzedLabel}
+          </span>
+        ) : null}
         <button className="focus-ring flex items-center gap-2 rounded-md border border-border bg-surface py-1 pr-2 pl-1 hover:border-border-strong">
           <span className="grid size-5 place-items-center rounded-[4px] bg-violet/20 font-mono text-[10px] text-violet-soft">
             MO

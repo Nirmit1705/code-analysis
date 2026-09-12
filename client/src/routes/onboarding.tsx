@@ -24,6 +24,7 @@ import { PRODUCT } from "@/lib/repo-data";
 import { Dot, Ring, StatCell, Tag } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 import { isAuthenticated } from "@/lib/auth";
+import { setActiveRepositoryId } from "@/lib/active-repo";
 import {
   useGithubExchange,
   useGithubInstall,
@@ -198,6 +199,10 @@ function Onboarding() {
     selectRepo.mutate(selectedRepo, {
       onSuccess: (repo) => {
         setRepository(repo);
+        // The repo becomes "active" for `/app/*` as soon as it's connected,
+        // not only once analysis finishes — this is the earliest point a
+        // real `Repository.id` exists to anchor it to (Phase 6.1).
+        setActiveRepositoryId(repo.id);
         setSelectedBranchName(null);
         setStep(3);
       },

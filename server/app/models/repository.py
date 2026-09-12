@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,10 @@ class Repository(Base):
     # convention from Phase 1 rather than mixing id representations.
     github_repo_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     default_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Phase 6.1: `GitHubRepoSummary.private` was already fetched from GitHub
+    # at connect time (GET /github/repos) but dropped on the floor before
+    # this column existed — now persisted by `POST /repos`.
+    private: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     connected_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )

@@ -15,7 +15,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.analysis.debt import analyze_technical_debt
@@ -55,6 +55,7 @@ def upsert_repository(
     name: str,
     full_name: str,
     default_branch: str,
+    private: bool,
 ) -> Repository:
     """Creates the Repository row for a user's selected GitHub repo, or
     refreshes it if they'd already connected this same repo before
@@ -73,6 +74,7 @@ def upsert_repository(
             full_name=full_name,
             github_repo_id=github_repo_id,
             default_branch=default_branch,
+            private=private,
             connected_user_id=user.id,
             installation_id=installation_id,
         )
@@ -81,12 +83,52 @@ def upsert_repository(
         repository.name = name
         repository.full_name = full_name
         repository.default_branch = default_branch
+        repository.private = private
         repository.installation_id = installation_id
 
     db.add(repository)
     db.commit()
     db.refresh(repository)
     return repository
+
+
+def list_repositories_for_user(db: Session, user_id: uuid.UUID) -> list[Repository]:
+    """Every `Repository` the given user has connected, newest first.
+    Backs `GET /repos` (Phase 6.1) — the frontend's only way to resolve
+    "which repositories exist for this user" without already knowing an id,
+    needed for the new active-repository plumbing every `/app/*` screen
+    from Phase 6.3 onward depends on."""
+    return list(
+        db.execute(
+            select(Repository)
+            .where(Repository.connected_user_id == user_id)
+            .order_by(Repository.created_at.desc())
+        ).scalars()
+    )
+
+
+def get_last_completed_analysis_times(
+    db: Session, repository_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, datetime]:
+    """Batch lookup of each repository's most recent `COMPLETED`
+    `AnalysisRun.completed_at`, for `GET /repos`'s list view (Phase 6.1).
+    Deliberately not a stored column — `Repository.analysis_status` already
+    tracks the *outcome* of the most recent run, but not *when* the most
+    recent completed one actually finished, and the two can diverge (e.g. the
+    latest run FAILED but an earlier one COMPLETED). One grouped query over
+    all requested ids, reusing the existing `(repository_id, status)` index,
+    rather than a round trip per repository."""
+    if not repository_ids:
+        return {}
+    rows = db.execute(
+        select(AnalysisRun.repository_id, func.max(AnalysisRun.completed_at))
+        .where(
+            AnalysisRun.repository_id.in_(repository_ids),
+            AnalysisRun.status == AnalysisRunStatus.COMPLETED,
+        )
+        .group_by(AnalysisRun.repository_id)
+    ).all()
+    return {repository_id: completed_at for repository_id, completed_at in rows}
 
 
 def upsert_branches(db: Session, repository: Repository, github_branches: list[dict]) -> list[Branch]:

@@ -31,9 +31,19 @@ export interface RepositoryRead {
   full_name: string;
   github_repo_id: string;
   default_branch: string;
+  private: boolean;
   analysis_status: RepositoryAnalysisStatus;
   last_analyzed_commit_sha: string | null;
   created_at: string;
+}
+
+/** `RepositoryRead` plus one computed field, returned only by `GET /repos`
+ * (Phase 6.1) — when this repository's most recently *finished* analysis run
+ * completed, distinct from `analysis_status` (the *outcome* of the most
+ * recent run, which may be a later FAILED one). `null` if it's never had a
+ * completed run. */
+export interface RepositoryListItem extends RepositoryRead {
+  last_completed_analysis_at: string | null;
 }
 
 export interface BranchRead {
@@ -95,11 +105,25 @@ export function useSelectRepo() {
           name: repo.name,
           full_name: repo.full_name,
           default_branch: repo.default_branch,
+          private: repo.private,
         },
       }),
     onSuccess: (repository) => {
       void queryClient.invalidateQueries({ queryKey: ["repo-branches", repository.id] });
+      void queryClient.invalidateQueries({ queryKey: ["repositories"] });
     },
+  });
+}
+
+/** `GET /repos` — the current user's already-connected repositories, newest
+ * first. New in Phase 6.1: backs the "which repository is `/app/*` currently
+ * showing" active-repository plumbing (`@/lib/active-repo`) — nothing before
+ * this phase needed to list back what a user had already connected. */
+export function useRepositories() {
+  return useQuery({
+    queryKey: ["repositories"],
+    queryFn: () => apiFetch<RepositoryListItem[]>("/repos"),
+    retry: false,
   });
 }
 

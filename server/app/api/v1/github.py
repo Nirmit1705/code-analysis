@@ -30,7 +30,13 @@ from app.models.repository import Repository
 from app.models.user import User
 from app.schemas.auth import TokenResponse
 from app.schemas.github import GitHubExchangeRequest, GitHubInstallResponse
-from app.schemas.repository import BranchRead, GitHubRepoSummary, RepoSelectRequest, RepositoryRead
+from app.schemas.repository import (
+    BranchRead,
+    GitHubRepoSummary,
+    RepoSelectRequest,
+    RepositoryListItem,
+    RepositoryRead,
+)
 from app.services import github_service, repo_service
 from app.services.auth_service import get_user_by_email
 from app.services.github_auth_service import (
@@ -218,6 +224,27 @@ def list_github_repos(current_user: User = Depends(get_current_user)) -> list[Gi
     ]
 
 
+@repos_router.get("/repos", response_model=list[RepositoryListItem])
+def list_repos(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[RepositoryListItem]:
+    """Lists the current user's already-connected `Repository` rows (i.e.
+    ones previously persisted via `POST /repos` below), newest first — not
+    the live `GET /github/repos` list. New in Phase 6.1: resolves "which
+    repository is `/app/*` currently showing" on a fresh page load, since
+    nothing before this phase needed to list back what a user had already
+    connected."""
+    repositories = repo_service.list_repositories_for_user(db, current_user.id)
+    last_analyzed = repo_service.get_last_completed_analysis_times(db, [r.id for r in repositories])
+    return [
+        RepositoryListItem.model_validate(r).model_copy(
+            update={"last_completed_analysis_at": last_analyzed.get(r.id)}
+        )
+        for r in repositories
+    ]
+
+
 @repos_router.post("/repos", response_model=RepositoryRead)
 def select_repo(
     payload: RepoSelectRequest,
@@ -240,6 +267,7 @@ def select_repo(
         name=payload.name,
         full_name=payload.full_name,
         default_branch=payload.default_branch,
+        private=payload.private,
     )
 
 
