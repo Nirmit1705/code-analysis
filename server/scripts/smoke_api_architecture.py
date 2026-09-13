@@ -1,5 +1,6 @@
-"""Manual smoke test for Phase 6.5's Architecture backend:
+"""Manual smoke test for the Architecture backend:
 `app/services/module_classification.py::classify_modules`,
+`app/analysis/datasource.py::detect_database_provider`,
 `app/services/analysis_read_service.py::load_dependency_edges`, and
 `GET /repos/{id}/architecture` (`app/api/v1/architecture.py`).
 
@@ -9,20 +10,33 @@ Same `_check`/`run_*()`/PASS-FAIL/exit-code template every other
 codebase's established "small helper duplication over cross-script coupling"
 convention).
 
-Seven groups:
+**Revised after real-repo review** (see `server/CLAUDE.md`'s Phase 6.5/6.6
+follow-up): the classification rules changed from a pure depth-2 path
+truncation to semantic-role recognition (routes/controllers/services/
+middleware, grounded in real `ApiEndpoint` ownership and a curated
+keyword vocabulary) plus named external-service recognition (Database/
+Redis/curated SaaS SDKs). Groups 3 and 5 below were rewritten to match;
+group 6 is new, added specifically to regression-test the core motivating
+fix — real internal edges between recognized components must survive as
+visible graph edges, not be silently absorbed the way the old depth-2
+grouping absorbed 97% of them.
+
+Eight groups:
 
 1. `run_not_analyzed()` — a repository with zero completed runs -> `GET`
    returns `{analyzed: false}`, no nodes/edges.
 2. `run_ownership_scoping()` — a second user's token -> 404.
 3. `run_classify_modules_unit()` — `classify_modules` exercised directly,
-   no DB, no HTTP: hand-built `File`/`ApiEndpoint` objects covering all
-   four ordered classification rules (folder-keyword incl. the
-   "matches on any file's full module path, not just the group's own
-   truncated depth-2 key" behavior; a folder-keyword group suppressing
-   rule 2's gateway-promotion; the promotion itself when no rule-1 gateway
-   exists, picking the busiest+thinnest API group; the frontend
-   language+keyword rule; the plain default) plus the >MAX_MODULE_GROUPS
-   folding behavior (30 singleton groups -> 24 kept + one `other:service`).
+   no DB, no HTTP: hand-built `File`/`ApiEndpoint` objects covering, in
+   order — real `ApiEndpoint` ownership taking priority over a data-
+   keyword folder match at the *grouping* stage (not just kind); the
+   pre-existing data/cache/gateway folder-keyword rule; the new
+   controllers/services/middleware role vocabulary, including its
+   language-aware kind (a frontend-side `services/` folder reads
+   `frontend`, not `service`); the frontend language+keyword rule for
+   non-role groups; the plain default; the root `"."` group's `"(root)"`
+   label; and the >MAX_MODULE_GROUPS folding behavior (30 singleton
+   groups -> 24 kept + one `other:service`).
 4. `run_load_dependency_edges_roundtrip()` — persists the `cyclic/` fixture
    (already hand-verified by `smoke_graph.py`/`smoke_storage.py`) via the
    real `create_queued_analysis_run`/`persist_analysis_run`, then confirms
@@ -37,25 +51,32 @@ Seven groups:
    any keyword list), exact edge set including both directions of the
    `module_a`<->`module_b` cycle marked `circular=True`, the deduped
    `module_c`->`module_a` edge (two import statements, one edge) marked
-   `circular=False`, and a synthetic `external` node + edge for
-   `orphan_module`'s `import os`.
-6. `run_real_repo_dogfood()` (secondary) — this repo's own `server/app` +
-   `client/src`, same ingestion technique as `smoke_storage.py`'s own
-   group 4. No exact kind/grouping expectations are asserted (this repo's
-   own shape collapses almost entirely to two depth-2 groups,
-   `server/app` and `client/src` — see the module-level note in
-   `server/CLAUDE.md`'s Phase 6.5 write-up for why that's a real,
-   observed consequence of the plan's literal grouping rule, not a bug);
-   only structural invariants that must hold regardless of grouping
-   granularity: every file is accounted for in exactly one non-external
+   `circular=False` — and, since Python's `os` (imported by
+   `orphan_module`) is a language builtin, now correctly *excluded* from
+   the external surface entirely (no external node at all for this
+   fixture — the old, less-correct behavior of showing every external
+   import including builtins is what this regression-tests against).
+6. `run_architecture_layering()` — **new**, the core regression test for
+   this fix: a small, real Express-shaped fixture
+   (`scripts/fixtures/architecture_layering/`) with real
+   `routes/`->`controllers/`->`services/` files that really `require()`
+   each other, a real `@prisma/client` + `ioredis` import, and a real
+   `schema.prisma`. Confirms — through the full real pipeline, not a
+   hand-built shortcut — that routes/controllers/services appear as
+   three separate, correctly-labeled, connected nodes (not one merged
+   blob swallowing the real edges between them, the old bug), that a
+   real "PostgreSQL" node appears (from `schema.prisma`'s provider line)
+   with an edge from Services, and a real "Redis" node with an edge from
+   Services too.
+7. `run_real_repo_dogfood()` (secondary) — this repo's own `server/app` +
+   `client/src`. No exact kind/grouping expectations are asserted; only
+   structural invariants that must hold regardless of how classification
+   groups things: every file is accounted for in exactly one non-external
    node, edge weights are positive, and no edge names a node id absent
    from the node list.
-7. `run_live_bonus()` (non-gating) — the real, already-analyzed
+8. `run_live_bonus()` (non-gating) — the real, already-analyzed
    `Nirmit1705/HireSight` repository already in this dev environment's
-   database (Phase 6.1-6.4's own sample repo), for the plan's own
-   "eyeball that the kind mix looks sane for HireSight's real
-   frontend/backend split" verification step. Skips cleanly if no such
-   repository/completed run exists in this database.
+   database. Skips cleanly if no such repository/completed run exists.
 
 Run: `uv run python scripts/smoke_api_architecture.py` (from `server/`).
 """
@@ -250,102 +271,141 @@ def run_classify_modules_unit() -> bool:
     print("\n=== group 3: classify_modules() unit coverage (no DB, no HTTP) ===")
     all_passed = True
 
-    # --- 3a: rule-1 (folder keyword, matched over the group's full file
-    # paths, not just its truncated 2-segment key) takes priority over
-    # rule 2 (API endpoints present) even when the group HAS endpoints;
-    # also covers cache and gateway-by-folder in the same pass. ---
+    # --- 3a: real ApiEndpoint ownership takes priority over a data-keyword
+    # folder match *at the grouping stage itself* — a module whose path
+    # contains "db" (a data keyword) but that owns a real API endpoint is
+    # pulled into its own "routes" group, not folded into a data group.
+    # Also covers the pre-existing cache/gateway folder-keyword rule
+    # (unaffected by the rewrite) in the same pass. ---
     files_a = [
-        _file("backend/app/models/user.py", "backend/app/models", Language.PYTHON, 50),
-        _file("backend/app/api/routes.py", "backend/app/api", Language.PYTHON, 20),  # same group as above (depth-2 "backend/app")
+        _file("backend/app/models/user.py", "backend/app/models", Language.PYTHON, 50),  # data keyword, no endpoint
+        _file("backend/app/db_routes/handler.py", "backend/app/db_routes", Language.PYTHON, 20),  # "db" keyword + a real endpoint
         _file("infra/cache/store.py", "infra/cache", Language.PYTHON, 40),
         _file("infra/gateway/router.py", "infra/gateway", Language.PYTHON, 25),
     ]
-    apis_a = [
-        _api("GET", "/users", "backend/app/api"),
-        _api("GET", "/health", "infra/gateway"),
-    ]
+    apis_a = [_api("GET", "/records", "backend/app/db_routes")]
     result_a = classify_modules(files_a, apis_a)
     kind_a = {g.id: g.kind for g in result_a.groups}
+    label_a = {g.id: g.label for g in result_a.groups}
     all_passed &= _check(
-        "backend/app -> data (folder-keyword 'models' beats its own API endpoint)",
+        "backend/app (models, no endpoint) -> data (folder keyword)",
         kind_a.get("backend/app") is ModuleKind.DATA, str(kind_a),
     )
-    all_passed &= _check("infra/cache -> cache (folder keyword)", kind_a.get("infra/cache") is ModuleKind.CACHE, str(kind_a))
     all_passed &= _check(
-        "infra/gateway -> gateway (folder keyword, not the rule-2 promotion path)",
-        kind_a.get("infra/gateway") is ModuleKind.GATEWAY, str(kind_a),
+        "backend/routes (db_routes, HAS an endpoint) -> gateway, NOT data — endpoint ownership wins at grouping",
+        kind_a.get("backend/routes") is ModuleKind.GATEWAY, str(kind_a),
     )
-    backend_group = next(g for g in result_a.groups if g.id == "backend/app")
     all_passed &= _check(
-        "backend/app.apis still lists its real endpoint despite being classified data",
-        backend_group.apis == ["GET /users"], str(backend_group.apis),
+        "backend/routes labeled 'API Routes'", label_a.get("backend/routes") == "API Routes", str(label_a),
+    )
+    all_passed &= _check("infra/cache -> cache (folder keyword)", kind_a.get("infra/cache") is ModuleKind.CACHE, str(kind_a))
+    all_passed &= _check("infra/gateway -> gateway (folder keyword)", kind_a.get("infra/gateway") is ModuleKind.GATEWAY, str(kind_a))
+    routes_group = next(g for g in result_a.groups if g.id == "backend/routes")
+    all_passed &= _check(
+        "backend/routes.apis lists its real endpoint", routes_group.apis == ["GET /records"], str(routes_group.apis),
     )
 
-    # --- 3b: rule-2 promotion — no rule-1 gateway anywhere in this second,
-    # independent classify_modules() call, so the single busiest+thinnest
-    # API group gets promoted to gateway; the others stay service. ---
-    files_b = [
-        *[_file(f"svc/thin/f{i}.py", "svc/thin", Language.PYTHON, 10) for i in range(5)],  # 5 tiny files, avg loc 10
-        *[_file(f"svc/thick/f{i}.py", "svc/thick", Language.PYTHON, 200) for i in range(2)],  # 2 huge files, avg loc 200
-        _file("svc/quiet/f0.py", "svc/quiet", Language.PYTHON, 30),  # no API endpoints at all
-    ]
-    apis_b = [
-        *[_api("GET", f"/thin/{i}", "svc/thin") for i in range(5)],  # highest endpoint count (5), smallest avg size
-        _api("GET", "/thick", "svc/thick"),
-    ]
+    # --- 3b: a route-owning group gets recognized regardless of its own
+    # folder name (no "routes"/"api" folder-keyword guessing exists at
+    # all — ApiEndpoint ownership is the only signal). ---
+    files_b = [_file("svc/misc/endpoint.py", "svc/misc", Language.PYTHON, 15)]
+    apis_b = [_api("GET", "/misc", "svc/misc")]
     result_b = classify_modules(files_b, apis_b)
     kind_b = {g.id: g.kind for g in result_b.groups}
+    label_b = {g.id: g.label for g in result_b.groups}
     all_passed &= _check(
-        "svc/thin (5 endpoints, avg loc 10) promoted to gateway",
-        kind_b.get("svc/thin") is ModuleKind.GATEWAY, str(kind_b),
-    )
-    all_passed &= _check("svc/thick stays service (not the promoted one)", kind_b.get("svc/thick") is ModuleKind.SERVICE, str(kind_b))
-    all_passed &= _check("svc/quiet stays service (default rule, zero endpoints)", kind_b.get("svc/quiet") is ModuleKind.SERVICE, str(kind_b))
-    all_passed &= _check(
-        "exactly one gateway group results from promotion", sum(1 for k in kind_b.values() if k is ModuleKind.GATEWAY) == 1, str(kind_b)
+        "svc/misc (no 'routes'/'api' folder name at all) -> svc/routes, gateway, 'API Routes'",
+        kind_b.get("svc/routes") is ModuleKind.GATEWAY and label_b.get("svc/routes") == "API Routes",
+        f"{kind_b} {label_b}",
     )
 
-    # --- 3c: rule-3 frontend (predominantly JS/TS/TSX + frontend keyword,
-    # zero API endpoints) vs. a JS-heavy group that ISN'T under a
-    # frontend-keyword path, which must fall through to the rule-4 default. ---
+    # --- 3c: the new controllers/services/middleware role vocabulary,
+    # scanned over every file's full module path (same mechanism as the
+    # data/cache/gateway rule). Kind is language-aware: a frontend-side
+    # "services" folder reads as frontend, not backend business logic. ---
     files_c = [
-        _file("apps/client/App.tsx", "apps/client", Language.TSX, 60),
-        _file("apps/client/index.ts", "apps/client", Language.TYPESCRIPT, 15),
-        _file("tools/scripts/build.ts", "tools/scripts", Language.TYPESCRIPT, 25),  # JS-heavy but no frontend keyword
+        _file("server/src/controllers/user.ts", "server/src/controllers", Language.TYPESCRIPT, 30),
+        _file("server/src/services/user.ts", "server/src/services", Language.TYPESCRIPT, 40),
+        _file("server/src/middleware/auth.ts", "server/src/middleware", Language.TYPESCRIPT, 10),
+        _file("client/src/services/api.ts", "client/src/services", Language.TSX, 20),
     ]
     result_c = classify_modules(files_c, [])
     kind_c = {g.id: g.kind for g in result_c.groups}
-    all_passed &= _check("apps/client -> frontend", kind_c.get("apps/client") is ModuleKind.FRONTEND, str(kind_c))
+    label_c = {g.id: g.label for g in result_c.groups}
     all_passed &= _check(
-        "tools/scripts -> service (JS-heavy but no frontend-keyword path segment)",
-        kind_c.get("tools/scripts") is ModuleKind.SERVICE, str(kind_c),
+        "server/controllers -> service, 'Controllers'",
+        kind_c.get("server/controllers") is ModuleKind.SERVICE and label_c.get("server/controllers") == "Controllers",
+        f"{kind_c} {label_c}",
+    )
+    all_passed &= _check(
+        "server/services -> service, 'Services'",
+        kind_c.get("server/services") is ModuleKind.SERVICE and label_c.get("server/services") == "Services",
+        f"{kind_c} {label_c}",
+    )
+    all_passed &= _check(
+        "server/middleware -> service, 'Middleware'",
+        kind_c.get("server/middleware") is ModuleKind.SERVICE and label_c.get("server/middleware") == "Middleware",
+        f"{kind_c} {label_c}",
+    )
+    all_passed &= _check(
+        "client/services -> FRONTEND (language-aware), still labeled 'Services'",
+        kind_c.get("client/services") is ModuleKind.FRONTEND and label_c.get("client/services") == "Services",
+        f"{kind_c} {label_c}",
     )
 
-    # --- 3d: folding beyond MAX_MODULE_GROUPS — 30 singleton groups, all
+    # --- 3d: the pre-existing frontend rule (predominantly JS/TS/TSX +
+    # frontend keyword, zero API endpoints) still applies to groups that
+    # match none of the roles above; a JS-heavy group with no frontend
+    # keyword still falls through to the plain default. ---
+    files_d = [
+        _file("apps/client/App.tsx", "apps/client", Language.TSX, 60),
+        _file("apps/client/index.ts", "apps/client", Language.TYPESCRIPT, 15),
+        _file("tools/scripts/build.ts", "tools/scripts", Language.TYPESCRIPT, 25),
+    ]
+    result_d = classify_modules(files_d, [])
+    kind_d = {g.id: g.kind for g in result_d.groups}
+    all_passed &= _check("apps/client -> frontend", kind_d.get("apps/client") is ModuleKind.FRONTEND, str(kind_d))
+    all_passed &= _check(
+        "tools/scripts -> service (JS-heavy but no frontend-keyword path segment)",
+        kind_d.get("tools/scripts") is ModuleKind.SERVICE, str(kind_d),
+    )
+
+    # --- 3e: the root "." group gets a real display label, not the bare
+    # period. ---
+    files_e = [_file("README.md", ".", None, 5)]
+    result_e = classify_modules(files_e, [])
+    root_group = result_e.groups[0]
+    all_passed &= _check(
+        "root group: id='.', label='(root)'",
+        root_group.id == "." and root_group.label == "(root)", str(root_group),
+    )
+
+    # --- 3f: folding beyond MAX_MODULE_GROUPS — 30 singleton groups, all
     # defaulting to service, none large enough to differentiate by file
     # count -> ties broken by id, so g00..g23 are kept and g24..g29 fold
-    # into one "other:service" node. ---
-    files_d = [_file(f"g{i:02d}/mod/f.py", f"g{i:02d}/mod", Language.PYTHON, 10) for i in range(30)]
-    result_d = classify_modules(files_d, [])
-    ids_d = {g.id for g in result_d.groups}
+    # into one "other:service" node. Unaffected by the rewrite (none of
+    # these keys touch any recognized role). ---
+    files_f = [_file(f"g{i:02d}/mod/f.py", f"g{i:02d}/mod", Language.PYTHON, 10) for i in range(30)]
+    result_f = classify_modules(files_f, [])
+    ids_f = {g.id for g in result_f.groups}
     all_passed &= _check(
         f"30 singleton groups fold to {MAX_MODULE_GROUPS} kept + 1 other bucket",
-        len(result_d.groups) == MAX_MODULE_GROUPS + 1, str(sorted(ids_d)),
+        len(result_f.groups) == MAX_MODULE_GROUPS + 1, str(sorted(ids_f)),
     )
-    all_passed &= _check("other:service is present", "other:service" in ids_d, str(sorted(ids_d)))
-    other_group_d = next(g for g in result_d.groups if g.id == "other:service")
-    all_passed &= _check("other:service folds exactly the 6 overflow groups' files", other_group_d.file_count == 6, str(other_group_d))
+    all_passed &= _check("other:service is present", "other:service" in ids_f, str(sorted(ids_f)))
+    other_group_f = next(g for g in result_f.groups if g.id == "other:service")
+    all_passed &= _check("other:service folds exactly the 6 overflow groups' files", other_group_f.file_count == 6, str(other_group_f))
     all_passed &= _check(
         "kept groups are exactly g00..g23 (ties broken by id ascending)",
-        ids_d - {"other:service"} == {f"g{i:02d}/mod" for i in range(24)}, str(sorted(ids_d)),
+        ids_f - {"other:service"} == {f"g{i:02d}/mod" for i in range(24)}, str(sorted(ids_f)),
     )
     all_passed &= _check(
         "overflow files map to the folded id in file_group_id",
-        all(result_d.file_group_id[f"g{i:02d}/mod/f.py"] == "other:service" for i in range(24, 30)),
+        all(result_f.file_group_id[f"g{i:02d}/mod/f.py"] == "other:service" for i in range(24, 30)),
     )
     all_passed &= _check(
         "kept files map to their own group id in file_group_id",
-        all(result_d.file_group_id[f"g{i:02d}/mod/f.py"] == f"g{i:02d}/mod" for i in range(24)),
+        all(result_f.file_group_id[f"g{i:02d}/mod/f.py"] == f"g{i:02d}/mod" for i in range(24)),
     )
 
     return all_passed
@@ -414,8 +474,9 @@ def run_architecture_cyclic_fixture() -> bool:
 
         node_ids = {n["id"] for n in body["nodes"]}
         all_passed &= _check(
-            "exactly the 4 real groups + the synthetic external node",
-            node_ids == {"cyclic/module_a", "cyclic/module_b", "cyclic/module_c", "cyclic/orphan_module", "external"},
+            "exactly the 4 real groups — no external node (orphan_module's only import, "
+            "Python's `os` builtin, is now correctly excluded, not shown as 'architecture')",
+            node_ids == {"cyclic/module_a", "cyclic/module_b", "cyclic/module_c", "cyclic/orphan_module"},
             str(node_ids),
         )
         kinds = {n["id"]: n["kind"] for n in body["nodes"]}
@@ -424,7 +485,6 @@ def run_architecture_cyclic_fixture() -> bool:
             all(kinds[k] == "service" for k in ("cyclic/module_a", "cyclic/module_b", "cyclic/module_c", "cyclic/orphan_module")),
             str(kinds),
         )
-        all_passed &= _check("external node's own kind is 'external'", kinds["external"] == "external", str(kinds))
 
         edges_by_pair = {(e["source"], e["target"]): e for e in body["edges"]}
         all_passed &= _check(
@@ -439,23 +499,134 @@ def run_architecture_cyclic_fixture() -> bool:
             mc_to_ma == {"source": "cyclic/module_c", "target": "cyclic/module_a", "weight": 1, "circular": False},
             str(mc_to_ma),
         )
-        orphan_to_external = edges_by_pair.get(("cyclic/orphan_module", "external"))
         all_passed &= _check(
-            "orphan_module's `import os` produces an edge into the synthetic external node",
-            orphan_to_external == {"source": "cyclic/orphan_module", "target": "external", "weight": 1, "circular": False},
-            str(orphan_to_external),
+            "no edge into 'external' at all — orphan_module's `import os` is excluded, not shown",
+            not any(e["target"] == "external" for e in body["edges"]),
+            str(body["edges"]),
         )
-        all_passed &= _check("exactly 4 edges total", len(body["edges"]) == 4, str(body["edges"]))
+        all_passed &= _check("exactly 3 edges total (the os-builtin edge no longer exists)", len(body["edges"]) == 3, str(body["edges"]))
         return all_passed
     finally:
         db.close()
 
 
-# --- group 6 (secondary): real dogfood run -----------------------------------------
+# --- group 6: real component layering (the core regression test) ------------------
+
+
+def run_architecture_layering() -> bool:
+    print("\n=== group 6: routes -> controllers -> services layering, real edges survive, named external services ===")
+    db = SessionLocal()
+    try:
+        user = _get_or_create_user(db, "smoke-api-arch-layering@local.test")
+        repository = _get_or_create_repository(
+            db, user, github_repo_id="smoke-api-arch-layering", owner="smoke-api", name="layering"
+        )
+
+        fixture_root = Path(__file__).resolve().parent / "fixtures" / "architecture_layering"
+        files = [
+            IngestedFile(path=p.relative_to(fixture_root).as_posix(), absolute_path=p, size_bytes=p.stat().st_size)
+            for p in sorted(fixture_root.rglob("*"))
+            if p.is_file()
+        ]
+        ingestion_result = IngestionResult(root_dir=fixture_root, files=files, ignored_paths=[])
+        commit_sha = "layering".ljust(40, "0")[:40]
+        result = analyze_ingested(ingestion_result, commit_sha=commit_sha)
+
+        _clear_previous_runs(db, repository)
+        queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+
+        all_passed = _check(
+            "AnalysisRun.database_provider persisted from schema.prisma", run.database_provider == "postgresql", str(run.database_provider)
+        )
+
+        token = create_access_token(subject=user.email)
+        client = TestClient(app)
+        resp = client.get(f"/api/v1/repos/{repository.id}/architecture", headers=_auth(token))
+        all_passed &= _check("GET -> 200", resp.status_code == 200, resp.text)
+        if not all_passed:
+            return False
+        body = resp.json()
+
+        nodes_by_id = {n["id"]: n for n in body["nodes"]}
+        all_passed &= _check(
+            "routes/controllers/services are three separate nodes (not one merged blob)",
+            {"server/routes", "server/controllers", "server/services"} <= set(nodes_by_id),
+            str(sorted(nodes_by_id)),
+        )
+        all_passed &= _check(
+            "server/routes: kind=gateway, label='API Routes', carries the real GET /users endpoint",
+            nodes_by_id["server/routes"]["kind"] == "gateway"
+            and nodes_by_id["server/routes"]["label"] == "API Routes"
+            and nodes_by_id["server/routes"]["apis"] == ["GET /users"],
+            str(nodes_by_id["server/routes"]),
+        )
+        all_passed &= _check(
+            "server/controllers: kind=service, label='Controllers'",
+            nodes_by_id["server/controllers"]["kind"] == "service" and nodes_by_id["server/controllers"]["label"] == "Controllers",
+            str(nodes_by_id["server/controllers"]),
+        )
+        all_passed &= _check(
+            "server/services: kind=service, label='Services'",
+            nodes_by_id["server/services"]["kind"] == "service" and nodes_by_id["server/services"]["label"] == "Services",
+            str(nodes_by_id["server/services"]),
+        )
+
+        edge_pairs = {(e["source"], e["target"]) for e in body["edges"]}
+        all_passed &= _check(
+            "real edge server/routes -> server/controllers survives (the core fix — this used to be "
+            "absorbed as 'same group' under the old depth-2 grouping)",
+            ("server/routes", "server/controllers") in edge_pairs, str(sorted(edge_pairs)),
+        )
+        all_passed &= _check(
+            "real edge server/controllers -> server/services survives",
+            ("server/controllers", "server/services") in edge_pairs, str(sorted(edge_pairs)),
+        )
+
+        db_node = nodes_by_id.get("data:database")
+        all_passed &= _check(
+            "a real 'PostgreSQL' node exists (from schema.prisma's provider line, not a generic guess)",
+            db_node is not None and db_node["label"] == "PostgreSQL" and db_node["kind"] == "data",
+            str(db_node),
+        )
+        all_passed &= _check(
+            "server/services -> data:database edge exists (real @prisma/client import)",
+            ("server/services", "data:database") in edge_pairs, str(sorted(edge_pairs)),
+        )
+
+        redis_node = nodes_by_id.get("cache:redis")
+        all_passed &= _check(
+            "a real 'Redis' node exists (from the real ioredis import)",
+            redis_node is not None and redis_node["label"] == "Redis" and redis_node["kind"] == "cache",
+            str(redis_node),
+        )
+        all_passed &= _check(
+            "server/services -> cache:redis edge exists (real ioredis import)",
+            ("server/services", "cache:redis") in edge_pairs, str(sorted(edge_pairs)),
+        )
+        # `express` itself is a real external import too, and it's
+        # deliberately *not* curated (Express is already represented via
+        # the "routes" recognition — a redundant "Express" external node
+        # would add noise, not signal) — so it correctly falls into the
+        # generic catch-all rather than vanishing.
+        all_passed &= _check(
+            "the generic 'External Dependencies' node exists for express (not curated, not excluded)",
+            "external" in nodes_by_id, str(sorted(nodes_by_id)),
+        )
+        all_passed &= _check(
+            "server/routes -> external edge exists (the real require('express'))",
+            ("server/routes", "external") in edge_pairs, str(sorted(edge_pairs)),
+        )
+        return all_passed
+    finally:
+        db.close()
+
+
+# --- group 7 (secondary): real dogfood run -----------------------------------------
 
 
 def run_real_repo_dogfood() -> bool:
-    print("\n=== group 6 (secondary): real dogfood run — this repo's own server/app + client/src ===")
+    print("\n=== group 7 (secondary): real dogfood run — this repo's own server/app + client/src ===")
     db = SessionLocal()
     try:
         user = _get_or_create_user(db, "smoke-api-arch-dogfood@local.test")
@@ -483,11 +654,15 @@ def run_real_repo_dogfood() -> bool:
         all_passed &= _check("analyzed == true", body["analyzed"] is True, str(body))
 
         total_file_count = db.execute(select(File).where(File.analysis_run_id == run.id)).scalars().all()
-        non_external_nodes = [n for n in body["nodes"] if n["id"] != "external"]
+        # Every synthetic node (the generic "external" catch-all, or a
+        # named one like "data:database"/"cache:redis") always reports
+        # files=0 — summing over *all* nodes is equivalent to summing only
+        # the real file-derived ones, without needing to enumerate every
+        # possible synthetic node id.
         all_passed &= _check(
-            "sum of non-external node file counts == total persisted File rows",
-            sum(n["files"] for n in non_external_nodes) == len(total_file_count),
-            f"{sum(n['files'] for n in non_external_nodes)} vs {len(total_file_count)}",
+            "sum of all node file counts == total persisted File rows",
+            sum(n["files"] for n in body["nodes"]) == len(total_file_count),
+            f"{sum(n['files'] for n in body['nodes'])} vs {len(total_file_count)}",
         )
         node_ids = {n["id"] for n in body["nodes"]}
         all_passed &= _check(
@@ -504,11 +679,11 @@ def run_real_repo_dogfood() -> bool:
         db.close()
 
 
-# --- group 7 (non-gating): live bonus against Nirmit1705/HireSight ----------------
+# --- group 8 (non-gating): live bonus against Nirmit1705/HireSight ----------------
 
 
 def run_live_bonus() -> bool:
-    print(f"\n=== group 7 (non-gating): live GET /architecture against {LIVE_TEST_OWNER}/{LIVE_TEST_REPO} ===")
+    print(f"\n=== group 8 (non-gating): live GET /architecture against {LIVE_TEST_OWNER}/{LIVE_TEST_REPO} ===")
     db = SessionLocal()
     try:
         repository = db.execute(
@@ -553,8 +728,9 @@ def main() -> int:
     r3 = run_classify_modules_unit()
     r4 = run_load_dependency_edges_roundtrip()
     r5 = run_architecture_cyclic_fixture()
-    r6 = run_real_repo_dogfood()
-    r7 = run_live_bonus()
+    r6 = run_architecture_layering()
+    r7 = run_real_repo_dogfood()
+    r8 = run_live_bonus()
 
     print("\n=== Summary ===")
     print(f"1. Not analyzed:                {'PASS' if r1 else 'FAIL'}")
@@ -562,9 +738,10 @@ def main() -> int:
     print(f"3. classify_modules() unit:     {'PASS' if r3 else 'FAIL'}")
     print(f"4. load_dependency_edges:       {'PASS' if r4 else 'FAIL'}")
     print(f"5. Architecture (cyclic fixture): {'PASS' if r5 else 'FAIL'}")
-    print(f"6. Real repo dogfood (secondary): {'PASS' if r6 else 'FAIL'}")
-    print(f"7. Live bonus (non-gating):     {'PASS' if r7 else 'FAIL (see above)'}")
-    return 0 if (r1 and r2 and r3 and r4 and r5 and r6) else 1
+    print(f"6. Architecture layering (core fix): {'PASS' if r6 else 'FAIL'}")
+    print(f"7. Real repo dogfood (secondary): {'PASS' if r7 else 'FAIL'}")
+    print(f"8. Live bonus (non-gating):     {'PASS' if r8 else 'FAIL (see above)'}")
+    return 0 if (r1 and r2 and r3 and r4 and r5 and r6 and r7) else 1
 
 
 if __name__ == "__main__":

@@ -350,6 +350,7 @@ def _synthetic_analysis_result(fixture: DebtFixture, *, commit_sha: str) -> Anal
         api_routes=[],
         dependency_edges=[],
         external_dependencies=fixture.external_dependencies,
+        database_provider=None,
         file_metrics=file_metrics,
         function_complexity=fixture.function_complexity,
         module_metrics=fixture.module_metrics,
@@ -464,6 +465,7 @@ def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
         api_routes=[],
         dependency_edges=[],
         external_dependencies=[],
+        database_provider=None,
         file_metrics=[
             FileMetrics(file_path="broken/mod/file.py", module="broken/mod", language=None, total_lines=5, loc=5)
         ],
