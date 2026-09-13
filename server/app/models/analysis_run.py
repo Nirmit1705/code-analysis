@@ -72,6 +72,13 @@ class AnalysisRun(Base):
     # `persist_analysis_run`. Exists so Phase 10's debt-trend time series has
     # something to query per run without re-summing every `DebtIssue` row.
     debt_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    # Added for the Architecture screen's real "Database" component
+    # (`docs/PHASE_6_PLAN.md` 6.5/6.6 follow-up): Prisma's own raw
+    # datasource-provider value (e.g. "postgresql"), from
+    # `analysis/datasource.py::detect_database_provider`. Nullable — most
+    # runs will have no Prisma schema at all, and that's a real "no
+    # evidence" outcome, not a data gap to backfill.
+    database_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

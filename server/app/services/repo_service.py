@@ -517,6 +517,9 @@ def persist_analysis_run(
         analysis_run.api_count = len(api_endpoint_rows)
         analysis_run.dependency_count = len(dependency_edge_rows)
         analysis_run.debt_score = debt_analysis.score
+        analysis_run.database_provider = (
+            analysis_result.database_provider.engine if analysis_result.database_provider else None
+        )
         analysis_run.status = AnalysisRunStatus.COMPLETED
         analysis_run.completed_at = datetime.now(timezone.utc)
 

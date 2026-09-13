@@ -29,6 +29,7 @@ from app.analysis.apis import ApiRoute
 from app.analysis.apis.express import compose_routes as compose_express_routes
 from app.analysis.apis.fastapi_flask import compose_routes as compose_fastapi_flask_routes
 from app.analysis.apis.spring_boot import compose_routes as compose_spring_boot_routes
+from app.analysis.datasource import DatabaseProvider, detect_database_provider
 from app.analysis.dependencies import DependencyEdge, ExternalDependency
 from app.analysis.dependencies.imports import (
     discover_manifest_dependencies,
@@ -69,6 +70,12 @@ class AnalysisResult:
     api_routes: list[ApiRoute]
     dependency_edges: list[DependencyEdge]
     external_dependencies: list[ExternalDependency]
+    # Phase 6.5/6.6's Architecture screen: the real detected database
+    # engine, when a Prisma `schema.prisma` is present and readable (see
+    # `analysis/datasource.py`). `None` is a real "no evidence" outcome —
+    # no Prisma schema found, or an unrecognized/malformed one — not "no
+    # database exists."
+    database_provider: DatabaseProvider | None
     file_metrics: list[FileMetrics]
     function_complexity: list[FunctionComplexity]
     module_metrics: list[ModuleMetrics]
@@ -203,6 +210,7 @@ def analyze_ingested(
     ts_path_aliases = discover_ts_path_aliases(files_by_path)
     dependency_edges = extract_import_edges(files_by_path, ts_path_aliases=ts_path_aliases)
     external_dependencies = discover_manifest_dependencies(files_by_path)
+    database_provider = detect_database_provider(files_by_path)
 
     function_complexity: list[FunctionComplexity] = []
     for file_path, source in files_by_path.items():
@@ -229,6 +237,7 @@ def analyze_ingested(
         api_routes=api_routes,
         dependency_edges=dependency_edges,
         external_dependencies=external_dependencies,
+        database_provider=database_provider,
         file_metrics=file_metrics,
         function_complexity=function_complexity,
         module_metrics=module_metrics,
