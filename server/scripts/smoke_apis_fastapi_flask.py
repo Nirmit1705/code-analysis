@@ -22,6 +22,15 @@ Three parts:
    `GET /api/v1/github/repos` — the last one via `repos_router`, which has
    no `prefix=` of its own at all, only `tags=`).
 
+   **Pre-existing gap found and fixed in passing (Phase 6.5, unrelated to
+   6.5's own work)**: Phase 6.1 added `GET /repos` to `repos_router` but
+   never updated this script's hardcoded `expectations` list/count, so this
+   check had been silently failing (`12` real routes extracted vs. an
+   expected `11`) since then — confirmed via `git stash` that it fails
+   identically on `main` before any Phase 6.5 change. Fixed here by adding
+   the missing expectation; not a regression from anything in Phase 6.5
+   (`architecture.py` isn't even in this check's ingested file set).
+
 Run: `uv run python scripts/smoke_apis_fastapi_flask.py` (from `server/`).
 """
 
@@ -157,6 +166,7 @@ def run_real_spot_check() -> bool:
         ("GET", "/api/v1/auth/github/callback"),
         ("POST", "/api/v1/auth/github/exchange"),
         ("GET", "/api/v1/github/repos"),
+        ("GET", "/api/v1/repos"),  # Phase 6.1's GET /repos (list), also on repos_router
         ("POST", "/api/v1/repos"),
         ("GET", "/api/v1/repos/{repository_id}/branches"),
         ("POST", "/api/v1/repos/{repository_id}/branches/{branch_name:path}/select"),
