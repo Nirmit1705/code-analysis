@@ -1,3 +1,4 @@
+import type { UseQueryResult } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RefreshCw, Sparkles, GitBranch, ArrowUpRight, ChevronsUpDown } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -5,6 +6,8 @@ import { formatDistanceToNow } from "date-fns";
 import { ArchGraph } from "@/components/arch-graph";
 import { Panel, PanelHeader, Ring, StatCell, Tag } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
+import { layoutNodes, toArchGraphEdges } from "@/lib/graph-layout";
+import { useArchitecture, type ArchitectureRead } from "@/lib/queries/architecture";
 import { useDashboard, type DashboardRead } from "@/lib/queries/dashboard";
 import { useRepositories } from "@/lib/queries/repos";
 
@@ -45,6 +48,7 @@ function Overview() {
   const repositories = useRepositories();
   const activeRepository = repositories.data?.find((r) => r.id === activeRepositoryId) ?? null;
   const dashboard = useDashboard(activeRepositoryId);
+  const architecture = useArchitecture(activeRepositoryId);
 
   const repoDisplayName = repositories.isLoading
     ? "Loading…"
@@ -95,7 +99,7 @@ function Overview() {
       </div>
     </Panel>
   ) : (
-    <DashboardBody data={dashboard.data} />
+    <DashboardBody data={dashboard.data} architecture={architecture} />
   );
 
   return (
@@ -146,8 +150,23 @@ function Overview() {
   );
 }
 
-function DashboardBody({ data }: { data: DashboardRead }) {
+function DashboardBody({
+  data,
+  architecture,
+}: {
+  data: DashboardRead;
+  architecture: UseQueryResult<ArchitectureRead, Error>;
+}) {
   const stats = data.stats!;
+  const archData = architecture.data;
+  const positionedNodes = archData ? layoutNodes(archData.nodes) : [];
+  const archGraphEdges = archData ? toArchGraphEdges(archData.edges) : [];
+  const circularCount = archData ? archData.edges.filter((e) => e.circular).length : 0;
+  const archSubtitle = architecture.isLoading
+    ? "loading…"
+    : !archData?.analyzed
+      ? "not available"
+      : `${archData.nodes.length} components · ${archData.edges.length} inferred edges · ${circularCount} circular ${circularCount === 1 ? "edge" : "edges"}`;
 
   return (
     <>
@@ -173,11 +192,11 @@ function DashboardBody({ data }: { data: DashboardRead }) {
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1.55fr_1fr]">
-        {/* ARCH SNAPSHOT — still the mock graph; real data lands in 6.5/6.6 */}
+        {/* ARCH SNAPSHOT — real data as of Phase 6.6 */}
         <Panel className="overflow-hidden">
           <PanelHeader
             title="Architecture snapshot"
-            subtitle="9 components · 14 inferred edges · 2 risk paths"
+            subtitle={archSubtitle}
             actions={
               <Link
                 to="/app/architecture"
@@ -188,7 +207,22 @@ function DashboardBody({ data }: { data: DashboardRead }) {
             }
           />
           <div className="p-3">
-            <ArchGraph compact className="h-[300px]" />
+            {architecture.isLoading ? (
+              <p className="flex h-[300px] items-center justify-center text-[12px] text-subtle">
+                Loading architecture…
+              </p>
+            ) : archData?.analyzed && positionedNodes.length > 0 ? (
+              <ArchGraph
+                nodes={positionedNodes}
+                edges={archGraphEdges}
+                compact
+                className="h-[300px]"
+              />
+            ) : (
+              <p className="flex h-[300px] items-center justify-center text-[12px] text-subtle">
+                Architecture snapshot unavailable.
+              </p>
+            )}
             <div className="mt-2 flex flex-wrap items-center gap-3 px-1 text-[11px] text-subtle">
               {[
                 ["Frontend", "var(--info)"],

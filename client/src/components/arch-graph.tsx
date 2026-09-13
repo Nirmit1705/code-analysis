@@ -1,20 +1,64 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { graphEdges, graphNodes, type GraphNode } from "@/lib/repo-data";
+import {
+  graphEdges as mockGraphEdges,
+  graphNodes as mockGraphNodes,
+  type GraphNode,
+} from "@/lib/repo-data";
 
-const kindStyle: Record<GraphNode["kind"], { fill: string; stroke: string; glow: string }> = {
+/** The six module kinds Phase 6.5's backend classifier assigns
+ * (`server/app/services/module_classification.py::ModuleKind`) — the
+ * single source of truth for this union, imported by every module that
+ * needs to talk about a node's kind (`graph-layout.ts`,
+ * `queries/architecture.ts`). */
+export type ModuleKind = GraphNode["kind"];
+
+/** What `ArchGraph` itself actually needs to render one node — a strict
+ * subset of the mock's own richer `GraphNode` (which also carries
+ * `health`/`description`/`keyFiles`/`apis`/`insight`, none of which this
+ * component reads). `health` stays optional and is used only for the
+ * corner status dot: real Architecture data (Phase 6.5) deliberately
+ * never computes a per-node health score (no per-module formula was ever
+ * specified, unlike Dashboard's fully-specified one), so the dot is
+ * simply omitted rather than fabricating one. */
+export interface ArchGraphNode {
+  id: string;
+  label: string;
+  kind: ModuleKind;
+  x: number;
+  y: number;
+  files: number;
+  health?: number;
+}
+
+export interface ArchGraphEdge {
+  from: string;
+  to: string;
+  label?: string;
+  risk?: "high" | "med";
+}
+
+const kindStyle: Record<ModuleKind, { fill: string; stroke: string; glow: string }> = {
   frontend: { fill: "oklch(0.735 0.03 250 / 0.14)", stroke: "var(--info)", glow: "var(--info)" },
   gateway: { fill: "oklch(0.703 0.198 42 / 0.18)", stroke: "var(--violet)", glow: "var(--violet)" },
-  service: { fill: "oklch(0.703 0.198 42 / 0.12)", stroke: "var(--violet-soft)", glow: "var(--violet)" },
+  service: {
+    fill: "oklch(0.703 0.198 42 / 0.12)",
+    stroke: "var(--violet-soft)",
+    glow: "var(--violet)",
+  },
   data: { fill: "oklch(0.72 0.16 152 / 0.14)", stroke: "var(--success)", glow: "var(--success)" },
   cache: { fill: "oklch(0.63 0.02 255 / 0.16)", stroke: "var(--cyan)", glow: "var(--cyan)" },
-  external: { fill: "oklch(0.648 0.192 41 / 0.16)", stroke: "var(--magenta)", glow: "var(--magenta)" },
+  external: {
+    fill: "oklch(0.648 0.192 41 / 0.16)",
+    stroke: "var(--magenta)",
+    glow: "var(--magenta)",
+  },
 };
 
 const NODE_W = 152;
 const NODE_H = 52;
 
-function edgePath(a: GraphNode, b: GraphNode) {
+function edgePath(a: ArchGraphNode, b: ArchGraphNode) {
   const x1 = a.x + NODE_W;
   const y1 = a.y + NODE_H / 2;
   const x2 = b.x;
@@ -24,6 +68,8 @@ function edgePath(a: GraphNode, b: GraphNode) {
 }
 
 export function ArchGraph({
+  nodes = mockGraphNodes,
+  edges = mockGraphEdges,
   selectedId,
   onSelect,
   interactive = true,
@@ -33,18 +79,28 @@ export function ArchGraph({
   className,
   compact,
 }: {
+  /** Defaults to the mock graph — the landing page (`routes/index.tsx`)
+   * and the not-yet-wired Dependencies screen (Phase 6.10) still render
+   * this component with no `nodes`/`edges` at all; real callers
+   * (`app.architecture.tsx`, `app.index.tsx`, Phase 6.6) always pass
+   * their own. */
+  nodes?: ArchGraphNode[];
+  edges?: ArchGraphEdge[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   interactive?: boolean;
   staticView?: boolean;
-  filterKinds?: GraphNode["kind"][];
+  filterKinds?: ModuleKind[];
   query?: string;
   className?: string;
   compact?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(compact ? (staticView ? 0.62 : 0.62) : 0.9);
-  const [offset, setOffset] = useState({ x: compact ? (staticView ? 4 : 8) : 24, y: compact ? (staticView ? 8 : 6) : 12 });
+  const [offset, setOffset] = useState({
+    x: compact ? (staticView ? 4 : 8) : 24,
+    y: compact ? (staticView ? 8 : 6) : 12,
+  });
   const [hover, setHover] = useState<string | null>(null);
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const stateRef = useRef({ zoom, offset });
@@ -75,11 +131,11 @@ export function ArchGraph({
     return () => el.removeEventListener("wheel", handler);
   }, [interactive, wheel]);
 
-  const visible = (n: GraphNode) =>
+  const visible = (n: ArchGraphNode) =>
     (!filterKinds || filterKinds.length === 0 || filterKinds.includes(n.kind)) &&
     (query.trim() === "" || n.label.toLowerCase().includes(query.trim().toLowerCase()));
 
-  const nodeMap = Object.fromEntries(graphNodes.map((n) => [n.id, n]));
+  const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
 
   return (
     <div
@@ -106,13 +162,19 @@ export function ArchGraph({
       <div className="pointer-events-none absolute inset-0 ambient-panel" />
       <svg className="absolute inset-0 h-full w-full">
         <g transform={`translate(${offset.x},${offset.y}) scale(${zoom})`}>
-          {graphEdges.map((e, i) => {
+          {edges.map((e, i) => {
             const a = nodeMap[e.from];
             const b = nodeMap[e.to];
             if (!a || !b || !visible(a) || !visible(b)) return null;
-            const active = !staticView && (hover === e.from || hover === e.to || selectedId === e.from || selectedId === e.to);
+            const active =
+              !staticView &&
+              (hover === e.from || hover === e.to || selectedId === e.from || selectedId === e.to);
             const stroke =
-              e.risk === "high" ? "var(--danger)" : e.risk === "med" ? "var(--warning)" : "var(--border-strong)";
+              e.risk === "high"
+                ? "var(--danger)"
+                : e.risk === "med"
+                  ? "var(--warning)"
+                  : "var(--border-strong)";
             return (
               <g key={i}>
                 <path
@@ -139,10 +201,20 @@ export function ArchGraph({
             );
           })}
 
-          {graphNodes.filter(visible).map((n) => {
+          {nodes.filter(visible).map((n) => {
             const s = kindStyle[n.kind];
             const isSel = selectedId === n.id;
-            const tone = n.health >= 80 ? "var(--success)" : n.health >= 70 ? "var(--warning)" : "var(--danger)";
+            // `health` is optional (see `ArchGraphNode`'s own docstring) —
+            // real Architecture data never supplies it, so the corner dot
+            // is simply omitted rather than defaulting to a fabricated tone.
+            const tone =
+              n.health == null
+                ? null
+                : n.health >= 80
+                  ? "var(--success)"
+                  : n.health >= 70
+                    ? "var(--warning)"
+                    : "var(--danger)";
             return (
               <g
                 key={n.id}
@@ -175,7 +247,12 @@ export function ArchGraph({
                   style={{ backdropFilter: "blur(2px)" }}
                 />
                 <rect width={3} height={NODE_H} rx={1.5} fill={s.stroke} opacity={0.9} />
-                <text x={14} y={21} className="fill-foreground" style={{ fontSize: 12, fontWeight: 550 }}>
+                <text
+                  x={14}
+                  y={21}
+                  className="fill-foreground"
+                  style={{ fontSize: 12, fontWeight: 550 }}
+                >
                   {n.label}
                 </text>
                 <text
@@ -186,7 +263,7 @@ export function ArchGraph({
                 >
                   {n.files} files
                 </text>
-                <circle cx={NODE_W - 14} cy={NODE_H - 14} r={3} fill={tone} />
+                {tone ? <circle cx={NODE_W - 14} cy={NODE_H - 14} r={3} fill={tone} /> : null}
               </g>
             );
           })}
@@ -227,4 +304,5 @@ export function ArchGraph({
   );
 }
 
-export const nodeById = (id: string) => graphNodes.find((n) => n.id === id);
+export const nodeById = <T extends { id: string }>(nodes: T[], id: string): T | undefined =>
+  nodes.find((n) => n.id === id);
