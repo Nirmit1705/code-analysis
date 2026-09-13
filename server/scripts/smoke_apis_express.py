@@ -11,6 +11,14 @@ collisions):
    `require`/`module.exports`.
 2. ESM: `esm_app.mjs` mounting `esm_router.mjs` at `/api/items` via
    `import`/`export default` instead of CommonJS.
+3. `frontend_http_client.js` — regression fixture for the false positive
+   found during Phase 6.5's real dogfooding against `Nirmit1705/HireSight`:
+   `axios.get/post(...)` calls (plus a variable literally named `router`
+   bound to something unrelated) share the exact same `.get/.post(path,
+   ...)` call shape as a real Express route, but none of these identifiers
+   are ever bound via `express()`/`express.Router()`. Asserts this fixture
+   contributes zero routes and that the real-world false-positive paths
+   (`/token`, `/aptitude/start`, `/aptitude/history`) never appear.
 
 No real spot-check against this repo's own source: the frontend is
 React/TanStack, not Express — there's no real Express code in this repo to
@@ -61,11 +69,17 @@ def run() -> bool:
 
     files = _load_files()
     all_passed &= _check(
-        "fixture files loaded", set(files) == {"app.js", "routes/users.js", "esm_app.mjs", "esm_router.mjs"}, str(set(files))
+        "fixture files loaded",
+        set(files)
+        == {"app.js", "routes/users.js", "esm_app.mjs", "esm_router.mjs", "frontend_http_client.js"},
+        str(set(files)),
     )
 
     routes = compose_routes(files)
-    all_passed &= _check("total routes: 11 (8 CommonJS + 3 ESM)", len(routes) == 11, str(len(routes)))
+    all_passed &= _check(
+        "total routes: 11 (8 CommonJS + 3 ESM; frontend_http_client.js contributes 0)",
+        len(routes) == 11, str(len(routes)),
+    )
     all_passed &= _check(
         "every route is framework EXPRESS", all(r.framework == Framework.EXPRESS for r in routes)
     )
@@ -117,6 +131,18 @@ def run() -> bool:
             route is not None and route.handler_symbol is not None and route.handler_symbol.name == handler,
             str(route),
         )
+
+    # --- regression: non-Express .get/.post calls must NOT be recorded as routes ---
+    frontend_routes = [r for r in routes if r.file_path == "frontend_http_client.js"]
+    all_passed &= _check(
+        "no routes originate from frontend_http_client.js (axios calls, non-Express 'router' variable)",
+        frontend_routes == [], str(frontend_routes),
+    )
+    false_positive_paths = [r for r in routes if r.path in ("/token", "/aptitude/start", "/aptitude/history")]
+    all_passed &= _check(
+        "the real false-positive paths (/token, /aptitude/start, /aptitude/history) are not present anywhere",
+        false_positive_paths == [], str(false_positive_paths),
+    )
 
     return all_passed
 

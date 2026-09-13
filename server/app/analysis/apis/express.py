@@ -46,6 +46,12 @@ Known limitations, called out here rather than scattered as TODOs:
   reported (`handler_name="getUsers"`) but with `handler_symbol=None`.
 - Chained route builders (`app.route('/x').get(h1).post(h2)`) are not
   recognized — not in this chunk's required bullet list.
+- A route registered inside a function body that's textually declared
+  *before* the app/router variable itself, but only ever *called* after
+  the variable is declared, is missed (`router_vars` reflects source
+  order, not runtime call order — this module never evaluates control
+  flow). Extremely rare in practice; not worth a multi-pass analysis to
+  handle.
 """
 
 from __future__ import annotations
@@ -380,6 +386,19 @@ def _handle_call(node: Node, extraction: _FileExtraction) -> None:
     if obj is None or prop is None or obj.type != "identifier":
         return
     router_var = _text(obj)
+    # The check the module docstring already promised but never actually
+    # enforced here: without it, ANY identifier calling `.get/.post/...`
+    # was recorded as a route — e.g. a frontend `axios.get('/token')` HTTP
+    # client call, which shares this exact call shape. Mirrors
+    # `fastapi_flask.py`'s own `_handle_call`/`_handle_decorated_definition`
+    # gate on `extraction.router_vars` at their own route-recording sites.
+    # `router_vars` is only reliable for identifiers already declared
+    # earlier in this same file's source order (see `_walk`'s single-pass,
+    # no-runtime-evaluation design) — true for essentially all real Express
+    # code, since JS's `const`/`import` ordering makes declare-before-use
+    # the only realistic pattern.
+    if router_var not in extraction.router_vars:
+        return
     method_name = _text(prop)
     arg_nodes = [c for c in args.children if c.type not in ("(", ")", ",")]
 
