@@ -42,6 +42,7 @@ from pathlib import PurePosixPath
 
 from tree_sitter import Node
 
+from app.analysis.binary_detect import is_binary
 from app.analysis.language_detect import Language
 from app.analysis.symbols import Symbol, SymbolKind
 from app.analysis.treesitter import parser_registry
@@ -171,10 +172,27 @@ def compute_function_complexity(
 def compute_file_metrics(source: bytes, *, file_path: str, language: Language | None) -> FileMetrics:
     """Line-count metrics for one file — computed for every ingested file
     regardless of language (matches the plan's "everything else is still
-    counted toward file totals" stance for unparsed languages), using a
-    best-effort text decode (`errors="replace"`) that never raises even on
-    a binary file; the resulting counts are meaningless for a binary file
-    but harmless (Phase 3 has no separate "is this file text" gate)."""
+    counted toward file totals" stance for unparsed languages; `language`
+    being `None` does not mean binary — see `language_detect.py`, whose
+    5-language allowlist is scoped to gating Tree-sitter parsing only,
+    not text-vs-binary). A binary file (`binary_detect.is_binary` — the
+    same strict-UTF-8-decode method already proven correct in
+    `api/v1/codebase.py::get_file_content`) gets `total_lines=0`/`loc=0`
+    rather than a meaningless count off a lossy `errors="replace"` decode
+    of arbitrary bytes; a genuine text file is completely unaffected —
+    the same best-effort decode + non-blank-line count as before.
+    `is_binary` never raises, so this function's existing guarantee of
+    never raising (relied on by `pipeline.py::analyze_ingested`, which
+    skips wrapping this call in the per-file try/except every other
+    stage uses) still holds."""
+    if is_binary(source):
+        return FileMetrics(
+            file_path=file_path,
+            module=str(PurePosixPath(file_path).parent),
+            language=language,
+            total_lines=0,
+            loc=0,
+        )
     text = source.decode("utf-8", errors="replace")
     lines = text.splitlines()
     loc = sum(1 for line in lines if line.strip())

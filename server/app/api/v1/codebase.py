@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.analysis.binary_detect import is_binary
 from app.analysis.dependencies import DependencyEdgeType
 from app.analysis.symbols import SymbolKind
 from app.api.deps import get_current_user, get_db
@@ -155,12 +156,10 @@ def get_file_content(
         return FileContentRead(path=file.path, content=None, truncated=True, binary=False)
 
     raw = base64.b64decode(data.get("content") or "")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
+    if is_binary(raw):
         return FileContentRead(path=file.path, content=None, truncated=False, binary=True)
 
-    return FileContentRead(path=file.path, content=text, truncated=False, binary=False)
+    return FileContentRead(path=file.path, content=raw.decode("utf-8"), truncated=False, binary=False)
 
 
 @router.get("/repos/{repository_id}/files/{file_id}/insight", response_model=FileInsightRead)

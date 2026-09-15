@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.analysis import metrics  # noqa: E402
+from app.analysis.binary_detect import is_binary  # noqa: E402
 from app.analysis.language_detect import Language  # noqa: E402
 from app.analysis.metrics import FileMetrics, FunctionComplexity  # noqa: E402
 from app.analysis.symbols.java import extract_symbols as extract_java_symbols  # noqa: E402
@@ -143,6 +144,17 @@ def run_file_and_module_metrics() -> bool:
 
     source_b = b"x = 1\ny = 2\n"
     fm_b = metrics.compute_file_metrics(source_b, file_path="pkg/b.py", language=Language.PYTHON)
+
+    # Known Issue #18 regression: a binary file must not be counted as if
+    # it were text — `loc`/`total_lines` are 0, not a garbled decode count.
+    binary_source = b"\xff\xfe\x00\x01\x02\x03garbage\x00\x04\x05"
+    fm_binary = metrics.compute_file_metrics(binary_source, file_path="assets/logo.png", language=None)
+    all_passed &= _check("binary file: loc == 0", fm_binary.loc == 0, str(fm_binary))
+    all_passed &= _check("binary file: total_lines == 0", fm_binary.total_lines == 0, str(fm_binary))
+
+    all_passed &= _check("is_binary: True for invalid UTF-8", is_binary(binary_source))
+    all_passed &= _check("is_binary: False for real text", not is_binary(source_a))
+    all_passed &= _check("is_binary: False for empty bytes", not is_binary(b""))
 
     py_source = (FIXTURES_DIR / "python" / "complexity.py").read_bytes()
     py_symbols = extract_python_symbols(py_source, file_path="pkg/a.py")
