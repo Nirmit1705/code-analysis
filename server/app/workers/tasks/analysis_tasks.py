@@ -21,6 +21,12 @@ Does not create the `AnalysisRun` row itself (Phase 5.1's
 `POST /repos/{id}/analysis-runs`, does that) and does not duplicate Phase
 5.1's persistence logic — `persist_analysis_run`/`mark_analysis_run_failed`
 are called as-is, unmodified, at the two points this task's own job ends.
+As of Phase 7.1, `persist_analysis_run` no longer finalizes a run to
+`COMPLETED` itself (it returns the run plus its `file_id_by_path`/
+`symbol_id_by_symbol` lookup maps instead) — this task calls the new
+`finalize_analysis_run_completed` explicitly right after, so RAG indexing
+(Phase 7.5) has a place to run in between without the DB ever transiently
+reading `COMPLETED` mid-index.
 
 On any pipeline-level failure (token resolution, ingestion, parsing/
 analysis, or persistence), the run is marked `FAILED`
@@ -43,7 +49,7 @@ from app.models.repository import Repository
 from app.schemas.analysis import AnalysisProgressEvent
 from app.services import github_service
 from app.services.progress_service import publish_progress_event
-from app.services.repo_service import mark_analysis_run_failed, persist_analysis_run
+from app.services.repo_service import finalize_analysis_run_completed, mark_analysis_run_failed, persist_analysis_run
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -131,9 +137,21 @@ def run_repository_analysis(analysis_run_id: str) -> dict:
 
             _transition(AnalysisRunStatus.BUILDING_GRAPH)
 
-            # Phase 5.1's own function — finalizes analysis_run to COMPLETED
-            # and commits internally; not duplicated here.
-            persist_analysis_run(db, analysis_run=analysis_run, analysis_result=result)
+            # Phase 5.1's own function, persists this run's facts (File/
+            # Symbol/DependencyEdge/ApiEndpoint/DebtIssue) in one transaction
+            # but no longer finalizes the run to COMPLETED itself (Phase 7.1
+            # split) — RAG indexing (Phase 7.5) runs in between, and
+            # finalize_analysis_run_completed below is the only place that
+            # sets COMPLETED, called exactly once regardless of whether
+            # indexing succeeds.
+            analysis_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+                db, analysis_run=analysis_run, analysis_result=result
+            )
+
+            # INDEXING/RAG wiring lands in Phase 7.5 — until then this is a
+            # direct, immediate finalize, matching the pre-Phase-7 behavior
+            # exactly (persist -> finalize, no stage in between yet).
+            analysis_run = finalize_analysis_run_completed(db, analysis_run=analysis_run, repository=repository)
 
             publish_progress_event(
                 analysis_run_id,

@@ -97,7 +97,7 @@ from app.analysis.apis import Framework  # noqa: E402
 from app.analysis.dependencies import DependencyEdgeType  # noqa: E402
 from app.analysis.ingestion import IngestedFile, IngestionResult  # noqa: E402
 from app.analysis.language_detect import Language  # noqa: E402
-from app.analysis.pipeline import analyze_ingested  # noqa: E402
+from app.analysis.pipeline import AnalysisResult, analyze_ingested  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.main import app  # noqa: E402
@@ -108,7 +108,11 @@ from app.models.repository import Repository  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services import analysis_read_service  # noqa: E402
 from app.services.module_classification import MAX_MODULE_GROUPS, ModuleKind, classify_modules  # noqa: E402
-from app.services.repo_service import create_queued_analysis_run, persist_analysis_run  # noqa: E402
+from app.services.repo_service import (  # noqa: E402
+    create_queued_analysis_run,
+    finalize_analysis_run_completed,
+    persist_analysis_run,
+)
 
 SERVER_ROOT = Path(__file__).resolve().parent.parent  # server/
 REPO_ROOT = SERVER_ROOT.parent
@@ -184,7 +188,7 @@ def _walk_real_repo(base: Path, rel_prefix: str, extensions: tuple[str, ...]) ->
     return files
 
 
-def _persist_cyclic_fixture(db: Session, repository: Repository) -> AnalysisRun:
+def _persist_cyclic_fixture(db: Session, repository: Repository) -> tuple[AnalysisRun, AnalysisResult]:
     root = FIXTURES_DIR / "cyclic"
     files = _load_ingested_files(root, "cyclic")
     ingestion_result = IngestionResult(root_dir=root, files=files, ignored_paths=[])
@@ -193,7 +197,11 @@ def _persist_cyclic_fixture(db: Session, repository: Repository) -> AnalysisRun:
 
     _clear_previous_runs(db, repository)
     queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
-    return persist_analysis_run(db, analysis_run=queued_run, analysis_result=result), result
+    run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+        db, analysis_run=queued_run, analysis_result=result
+    )
+    run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
+    return run, result
 
 
 # --- group 1: not analyzed --------------------------------------------------------
@@ -534,7 +542,10 @@ def run_architecture_layering() -> bool:
 
         _clear_previous_runs(db, repository)
         queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
-        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+        run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+            db, analysis_run=queued_run, analysis_result=result
+        )
+        run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
         all_passed = _check(
             "AnalysisRun.database_provider persisted from schema.prisma", run.database_provider == "postgresql", str(run.database_provider)
@@ -642,7 +653,10 @@ def run_real_repo_dogfood() -> bool:
 
         _clear_previous_runs(db, repository)
         queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
-        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+        run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+            db, analysis_run=queued_run, analysis_result=result
+        )
+        run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
         token = create_access_token(subject=user.email)
         client = TestClient(app)

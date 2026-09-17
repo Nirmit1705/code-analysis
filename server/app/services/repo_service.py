@@ -1,14 +1,21 @@
 """Repository/branch persistence backing the `app/api/v1/github.py` repo and
 branch endpoints (Phase 2.4). `create_queued_analysis_run` /
-`persist_analysis_run` / `mark_analysis_run_failed` (Phase 4.4, split for
-async use in Phase 5.1) live here too — together they're the place a Phase 3
+`persist_analysis_run` / `finalize_analysis_run_completed` /
+`mark_analysis_run_failed` (Phase 4.4, split for async use in Phase 5.1,
+`persist_analysis_run`/`finalize_analysis_run_completed` split further in
+Phase 7.1) live here too — together they're the place a Phase 3
 `AnalysisResult` (pure, in-memory) becomes real `AnalysisRun`/`File`/
-`Symbol`/`DependencyEdge`/`ApiEndpoint`/`DebtIssue` rows, across the two
-separate transactions Phase 5's "API queues now, Celery finalizes later"
-lifecycle needs: `create_queued_analysis_run` inserts the `QUEUED` row and
-returns immediately; `persist_analysis_run`/`mark_analysis_run_failed` each
-finalize an already-existing row later, to `COMPLETED` or `FAILED`
-respectively.
+`Symbol`/`DependencyEdge`/`ApiEndpoint`/`DebtIssue` rows, across the separate
+transactions Phase 5's "API queues now, Celery finalizes later" lifecycle
+needs: `create_queued_analysis_run` inserts the `QUEUED` row and returns
+immediately; `persist_analysis_run` persists a run's facts (File/Symbol/etc.)
+in one transaction but does *not* mark the run done; `mark_analysis_run_failed`
+finalizes an already-existing row to `FAILED`; `finalize_analysis_run_completed`
+finalizes one to `COMPLETED` — kept as its own explicit step (rather than
+folded into the tail of `persist_analysis_run`, as it was before Phase 7.1)
+because Phase 7's Celery task now needs to run RAG indexing *between* facts
+being persisted and the run actually counting as done, and the DB must never
+transiently read `COMPLETED` before that indexing stage has even started.
 """
 
 import uuid
@@ -315,17 +322,25 @@ def mark_analysis_run_failed(
 
 def persist_analysis_run(
     db: Session, *, analysis_run: AnalysisRun, analysis_result: AnalysisResult
-) -> AnalysisRun:
+) -> tuple[AnalysisRun, dict[str, uuid.UUID], dict[Symbol, uuid.UUID]]:
     """Persists one Phase 3 `AnalysisResult` (`analysis/pipeline.py`) onto an
     *existing* `AnalysisRun` row — its `File`/`Symbol`/`DependencyEdge`/
-    `ApiEndpoint`/`DebtIssue` children, plus finalizing the run itself to
-    `COMPLETED`. Each `AnalysisRun` gets its own complete row snapshot, not
-    diffed against the previous run (simplest correct model for history/
-    comparison later). Runs Phase 4.2's `analyze_dependency_graph` (for
-    `DependencyEdge.is_circular`) and Phase 4.3's `analyze_technical_debt`
-    (for the `DebtIssue` rows plus the run's aggregate `debt_score`) as part
-    of the same call — this is the one place those two pure modules' output
-    actually reaches the database.
+    `ApiEndpoint`/`DebtIssue` children. Each `AnalysisRun` gets its own
+    complete row snapshot, not diffed against the previous run (simplest
+    correct model for history/comparison later). Runs Phase 4.2's
+    `analyze_dependency_graph` (for `DependencyEdge.is_circular`) and Phase
+    4.3's `analyze_technical_debt` (for the `DebtIssue` rows plus the run's
+    aggregate `debt_score`) as part of the same call — this is the one place
+    those two pure modules' output actually reaches the database.
+
+    **Does not mark the run `COMPLETED`** (Phase 7.1 change — see the module
+    docstring for why) — call `finalize_analysis_run_completed` once the
+    caller is done with the run entirely (Phase 7's Celery task runs RAG
+    indexing in between). Returns `(analysis_run, file_id_by_path,
+    symbol_id_by_symbol)`: the same two lookup maps built below, so a caller
+    that also needs to resolve `File`/`Symbol` ids (Phase 7's
+    `index_analysis_run`, resolving `RagChunk` FKs) doesn't need a second DB
+    query to rebuild them.
 
     As of Phase 5.1, this function no longer creates the `AnalysisRun` row
     itself — it takes one already created by `create_queued_analysis_run`
@@ -520,11 +535,8 @@ def persist_analysis_run(
         analysis_run.database_provider = (
             analysis_result.database_provider.engine if analysis_result.database_provider else None
         )
-        analysis_run.status = AnalysisRunStatus.COMPLETED
-        analysis_run.completed_at = datetime.now(timezone.utc)
 
         repository.last_analyzed_commit_sha = analysis_result.commit_sha
-        repository.analysis_status = RepositoryAnalysisStatus.COMPLETED
 
         # Explicit staged `db.flush()`es, not just `db.add_all()` followed by
         # one `db.commit()` at the end: without any `relationship()` on these
@@ -559,5 +571,31 @@ def persist_analysis_run(
         db.rollback()
         raise
 
+    db.refresh(analysis_run)
+    return analysis_run, file_id_by_path, symbol_id_by_symbol
+
+
+def finalize_analysis_run_completed(db: Session, *, analysis_run: AnalysisRun, repository: Repository) -> AnalysisRun:
+    """Marks an `AnalysisRun` (and its `Repository`) `COMPLETED` — the tail
+    end that used to live inside `persist_analysis_run` itself, split out in
+    Phase 7.1 so a Celery task can run RAG indexing *between* persisting a
+    run's facts and the run actually counting as done, without the DB ever
+    transiently reading `COMPLETED` while indexing is still in flight (which
+    would make Phase 6.2's frontend REST-poll fallback stop polling early and
+    silently skip showing the real `INDEXING` stage).
+
+    Expects both `analysis_run` and `repository` to already be attached to
+    `db` (same assumption `mark_analysis_run_failed` makes below). Call this
+    exactly once per run, after indexing has been attempted (successfully or
+    not — see `app/workers/tasks/analysis_tasks.py`'s non-fatal indexing
+    wrapper) — never before, and never as a substitute for it.
+    """
+    analysis_run.status = AnalysisRunStatus.COMPLETED
+    analysis_run.completed_at = datetime.now(timezone.utc)
+    repository.analysis_status = RepositoryAnalysisStatus.COMPLETED
+
+    db.add(analysis_run)
+    db.add(repository)
+    db.commit()
     db.refresh(analysis_run)
     return analysis_run

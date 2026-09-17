@@ -3,8 +3,11 @@
 the real dev database. Updated in Phase 5.1 for the `create_queued_analysis_run`
 / `persist_analysis_run` / `mark_analysis_run_failed` split (every call site
 below now creates the `QUEUED` row first via `create_queued_analysis_run`,
-then finalizes it via `persist_analysis_run` — the two-call convention Phase
-5's async lifecycle needs).
+then persists via `persist_analysis_run`). Updated again in Phase 7.1:
+`persist_analysis_run` no longer finalizes a run to `COMPLETED` itself (it
+returns `(analysis_run, file_id_by_path, symbol_id_by_symbol)` instead of
+just `analysis_run`) — every call site below now finalizes explicitly via
+the new `finalize_analysis_run_completed`, a three-call convention.
 
 Per the plan-mode discussion that shaped this test (see
 `docs/BACKEND_IMPLEMENTATION_PLAN.md`'s Phase 4.4 section): **no new
@@ -94,6 +97,7 @@ from app.models.user import User  # noqa: E402
 from app.services import github_service  # noqa: E402
 from app.services.repo_service import (  # noqa: E402
     create_queued_analysis_run,
+    finalize_analysis_run_completed,
     mark_analysis_run_failed,
     persist_analysis_run,
 )
@@ -233,7 +237,10 @@ def run_dependency_cycle_persistence(db: Session, repository: Repository) -> boo
         queued_run = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main", commit_sha=commit_sha
         )
-        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+        run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+            db, analysis_run=queued_run, analysis_result=result
+        )
+        run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
         file_rows = db.execute(select(File).where(File.analysis_run_id == run.id)).scalars().all()
         symbol_rows = db.execute(select(SymbolRow).where(SymbolRow.analysis_run_id == run.id)).scalars().all()
@@ -369,7 +376,10 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
     dirty_queued = create_queued_analysis_run(
         db, repository_id=repository.id, branch="main", commit_sha=dirty_commit_sha
     )
-    dirty_run = persist_analysis_run(db, analysis_run=dirty_queued, analysis_result=dirty_result)
+    dirty_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+        db, analysis_run=dirty_queued, analysis_result=dirty_result
+    )
+    dirty_run = finalize_analysis_run_completed(db, analysis_run=dirty_run, repository=repository)
 
     dirty_issues = db.execute(select(DebtIssue).where(DebtIssue.analysis_run_id == dirty_run.id)).scalars().all()
     by_type = {issue.issue_type: issue for issue in dirty_issues}
@@ -424,7 +434,10 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
     clean_queued = create_queued_analysis_run(
         db, repository_id=repository.id, branch="main", commit_sha=clean_commit_sha
     )
-    clean_run = persist_analysis_run(db, analysis_run=clean_queued, analysis_result=clean_result)
+    clean_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+        db, analysis_run=clean_queued, analysis_result=clean_result
+    )
+    clean_run = finalize_analysis_run_completed(db, analysis_run=clean_run, repository=repository)
     clean_issue_count = db.execute(
         select(func.count()).select_from(DebtIssue).where(DebtIssue.analysis_run_id == clean_run.id)
     ).scalar_one()
@@ -588,7 +601,10 @@ def run_real_repo_dogfood(db: Session, repository: Repository) -> bool:
     queued_run = create_queued_analysis_run(
         db, repository_id=repository.id, branch="main", commit_sha=commit_sha
     )
-    run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+    run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+        db, analysis_run=queued_run, analysis_result=result
+    )
+    run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
     all_passed &= _check("AnalysisRun.status == COMPLETED", run.status is AnalysisRunStatus.COMPLETED)
     all_passed &= _check("AnalysisRun.completed_at is set", run.completed_at is not None)
@@ -673,7 +689,10 @@ def run_live_bonus(db: Session, user: User) -> bool:
         queued_run = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main", commit_sha=commit_sha
         )
-        run = persist_analysis_run(db, analysis_run=queued_run, analysis_result=result)
+        run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+            db, analysis_run=queued_run, analysis_result=result
+        )
+        run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
         file_count = db.execute(
             select(func.count()).select_from(File).where(File.analysis_run_id == run.id)
