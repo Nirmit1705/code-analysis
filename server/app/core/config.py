@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # Embeddings
     EMBEDDING_PROVIDER: str = ""
     EMBEDDING_MODEL: str = ""
-    EMBEDDING_DIM: int = 1536
+    EMBEDDING_DIM: int = 1024
 
     # Reranker
     RERANKER_PROVIDER: str = ""
