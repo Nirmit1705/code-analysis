@@ -22,13 +22,14 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.analysis import ingestion, metrics
 from app.analysis.apis import ApiRoute
 from app.analysis.apis.express import compose_routes as compose_express_routes
 from app.analysis.apis.fastapi_flask import compose_routes as compose_fastapi_flask_routes
 from app.analysis.apis.spring_boot import compose_routes as compose_spring_boot_routes
+from app.analysis.chunking import RagChunkDraft, build_rag_chunks
 from app.analysis.datasource import DatabaseProvider, detect_database_provider
 from app.analysis.dependencies import DependencyEdge, ExternalDependency
 from app.analysis.dependencies.imports import (
@@ -79,6 +80,11 @@ class AnalysisResult:
     file_metrics: list[FileMetrics]
     function_complexity: list[FunctionComplexity]
     module_metrics: list[ModuleMetrics]
+    # Phase 7.2: pure chunk text + metadata, no embedding yet (Phase 7.4+
+    # attaches one). Defaulted so every pre-existing direct `AnalysisResult(...)`
+    # construction (e.g. `scripts/smoke_storage.py`'s synthetic fixtures)
+    # keeps working unchanged.
+    rag_chunks: list[RagChunkDraft] = field(default_factory=list)
 
 
 def analyze_commit(
@@ -228,6 +234,20 @@ def analyze_ingested(
 
     module_metrics = metrics.aggregate_module_metrics(file_metrics, function_complexity)
 
+    # Pure chunk-text extraction (Phase 7.2) — reuses the file bytes/facts
+    # already built above, no second file read, no DB, no model call. Stays
+    # inside this same "analyzing" on_stage window rather than becoming a
+    # new pipeline stage of its own; Phase 7.5's Celery task is what
+    # introduces a real INDEXING status transition, once these drafts are
+    # actually embedded and persisted.
+    rag_chunks = build_rag_chunks(
+        files_by_path=files_by_path,
+        symbols_by_file=symbols_by_file,
+        api_routes=api_routes,
+        file_metrics=file_metrics,
+        dependency_edges=dependency_edges,
+    )
+
     return AnalysisResult(
         commit_sha=commit_sha,
         files=ingestion_result.files,
@@ -241,4 +261,5 @@ def analyze_ingested(
         file_metrics=file_metrics,
         function_complexity=function_complexity,
         module_metrics=module_metrics,
+        rag_chunks=rag_chunks,
     )
