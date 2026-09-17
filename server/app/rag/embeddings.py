@@ -1,0 +1,68 @@
+"""Local embedding provider (Phase 7.4) — Qwen3-Embedding-0.6B via sentence-transformers.
+
+Lazy module-level singleton model cache, mirroring `app/core/redis.py`'s
+`get_redis_client()` pattern: built on first use, not at import time. Not
+thread-safe — same accepted tradeoff as
+`analysis/treesitter/parser_registry.py`'s `Parser` cache (Known Issue #5),
+fine under this codebase's single-process model (Windows Celery
+`--pool=solo`, sync FastAPI).
+
+The model's own shipped "query" prompt (`config_sentence_transformers.json`
+on the Hub) is literally "Given a web search query, retrieve relevant
+passages that answer the query" — the wrong domain for a codebase-question
+RAG system. `embed_query` overrides it via `prompt=` with a codebase-specific
+instruction, reusing the same `Instruct: ...\nQuery:` template the model
+expects rather than the built-in `prompt_name="query"` default.
+"""
+
+from functools import lru_cache
+
+from sentence_transformers import SentenceTransformer
+
+from app.core.config import get_settings
+
+_QUERY_INSTRUCTION = (
+    "Instruct: Given a question about a software codebase, retrieve relevant "
+    "code, API routes, or documentation that answer the question\nQuery:"
+)
+
+
+@lru_cache
+def _get_model() -> SentenceTransformer:
+    settings = get_settings()
+    if settings.EMBEDDING_PROVIDER != "local":
+        raise RuntimeError(
+            f"EMBEDDING_PROVIDER={settings.EMBEDDING_PROVIDER!r} is not supported — "
+            "only 'local' is implemented (app/rag/embeddings.py)"
+        )
+    return SentenceTransformer(
+        settings.EMBEDDING_MODEL,
+        device="cpu",
+        processor_kwargs={"padding_side": "left"},
+    )
+
+
+def _assert_dim(actual_dim: int) -> None:
+    expected = get_settings().EMBEDDING_DIM
+    if actual_dim != expected:
+        raise RuntimeError(
+            f"embedding model produced {actual_dim}-dim vectors but "
+            f"settings.EMBEDDING_DIM={expected} — check app/core/config.py and "
+            "app/models/rag_chunk.py::EMBEDDING_DIM agree"
+        )
+
+
+def embed_query(text: str) -> list[float]:
+    """Embed a single user query, with the codebase-domain instruction prefix applied."""
+    vector = _get_model().encode(text, prompt=_QUERY_INSTRUCTION, normalize_embeddings=True)
+    _assert_dim(len(vector))
+    return vector.tolist()
+
+
+def embed_documents(texts: list[str], *, batch_size: int = 32) -> list[list[float]]:
+    """Embed chunk texts (no instruction prefix — documents are embedded plain)."""
+    if not texts:
+        return []
+    vectors = _get_model().encode(texts, batch_size=batch_size, normalize_embeddings=True)
+    _assert_dim(vectors.shape[1])
+    return vectors.tolist()

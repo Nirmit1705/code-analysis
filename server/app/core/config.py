@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     # Reranker
     RERANKER_PROVIDER: str = ""
+    RERANKER_MODEL: str = ""
 
     # CORS
     CORS_ALLOWED_ORIGINS: str = "http://localhost:8080"
