@@ -20,8 +20,9 @@ PostgreSQL, Redis, the FastAPI server, and a Celery worker are the normal local 
    - `TOKEN_ENCRYPTION_KEY` — a Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
    - `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET` — from your GitHub App's settings page (App ID/Client ID/Client Secret/webhook secret shown there directly; `GITHUB_PRIVATE_KEY_PATH` points at the `.pem` file you download from the same page — keep it outside version control, e.g. under a gitignored `secrets/` directory).
    - `SMEE_WEBHOOK_URL` — only needed for webhook work; a channel URL from [smee.io](https://smee.io) (click "Start a new channel").
-   - `LLM_API_KEY` / embedding/reranker settings — not required for Phases 1–6 of this backend; fill in when Phase 7/8 work needs them.
-   - **Note:** `.env.example` also documents `SMEE_WEBHOOK_URL`, `RERANKER_MODEL`, and `BACKEND_URL`, but `app/core/config.py::Settings` doesn't declare them as fields yet (they're silently ignored — `extra="ignore"`). They're there for forward/manual reference, not because app code reads them today.
+   - `LLM_API_KEY` — not required yet; Phase 8's job.
+   - Embedding/reranker settings (`EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`RERANKER_PROVIDER`/`RERANKER_MODEL`) — required as of Phase 7.4/7.5; `.env.example` already carries the correct local-model values, no manual edits needed. The Celery worker calls the embedding model for real on every completed analysis run now (`app/rag/indexing.py`), not just from an opt-in smoke script — see the note under "Celery worker" below.
+   - **Note:** `.env.example` also documents `SMEE_WEBHOOK_URL` and `BACKEND_URL`, but `app/core/config.py::Settings` doesn't declare them as fields yet (they're silently ignored — `extra="ignore"`). They're there for forward/manual reference, not because app code reads them today.
 2. Install dependencies: `uv sync` (from `server/`).
 
 ## Database
@@ -64,6 +65,8 @@ uv run celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 
 **`--pool=solo` is required on native Windows** — Celery's default prefork pool doesn't work there. If you're on Linux/macOS, or running the worker inside Docker/WSL, the default pool works and `--pool=solo` isn't needed.
 
+**As of Phase 7.5**, the worker's `INDEXING` stage loads the local embedding model (`Qwen/Qwen3-Embedding-0.6B`) for real on every analysis run — the first run after a fresh checkout downloads it (~1GB) from the Hugging Face Hub (cached afterward under `%USERPROFILE%\.cache\huggingface`), so expect that first run's `INDEXING` stage to take noticeably longer than the rest of the pipeline.
+
 ### 4. Smee relay (webhook work only)
 
 Not needed for normal API/analysis development — only when testing GitHub webhook delivery (which the app doesn't yet handle; see below).
@@ -87,3 +90,4 @@ This forwards webhook deliveries from your Smee channel to the local FastAPI ser
 - **Celery worker won't start / hangs on Windows** — you're likely missing `--pool=solo`; the default prefork pool isn't supported on native Windows.
 - **Smee deliveries 404** — expected until the webhook route is built; not a sign anything is misconfigured.
 - **Smee client fails with `Error: The provided URL is invalid.`** — if you're running the command from **Git Bash** (MSYS), its automatic Unix-path conversion silently rewrites a leading-`/` argument like `--path /api/v1/webhooks/github` into something like `C:/Program Files/Git/api/v1/webhooks/github`, which then fails URL validation. Run the Smee command from PowerShell or `cmd.exe` instead (verified working there), or, if you must use Git Bash, disable the conversion for that one call: `MSYS_NO_PATHCONV=1 npx smee-client@latest --url ... --path /api/v1/webhooks/github --port 8000`.
+- **An analysis run completes but has no RAG chunks** — RAG indexing (Phase 7.5) is deliberately non-fatal: a failed embedding call (no network for the first-run model download, out of memory, etc.) is logged server-side but never fails the run — `AnalysisRun.status` still reaches `COMPLETED`. Check the worker's log for `RAG indexing failed` around that run's timestamp; the run's `rag_chunks` stay empty (or partial) until a subsequent run succeeds, and Phase 7.6+ retrieval has nothing to find in the meantime.

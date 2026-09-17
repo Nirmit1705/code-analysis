@@ -13,10 +13,22 @@ passages that answer the query" — the wrong domain for a codebase-question
 RAG system. `embed_query` overrides it via `prompt=` with a codebase-specific
 instruction, reusing the same `Instruct: ...\nQuery:` template the model
 expects rather than the built-in `prompt_name="query"` default.
+
+**Device (Phase 7.5 addendum):** uses CUDA when `torch.cuda.is_available()`,
+CPU otherwise. `pyproject.toml`'s `torch` source moved from the CPU-only
+wheel index to a CUDA build (`cu124`) in the same sub-phase for the same
+reason — real, measured CPU-only fp32 inference over a real repo's full
+chunk set (~1,400 for `Nirmit1705/HireSight`) took 30+ minutes on this
+project's own dev machine, impractical for a live demo. A CUDA build still
+runs correctly on a CPU-only machine (`torch.cuda.is_available()` is simply
+`False` there); the deliberate portability tradeoff is a larger one-time
+`torch` download (~2.4GB vs. the CPU wheel), accepted because indexing
+speed matters more here than install size.
 """
 
 from functools import lru_cache
 
+import torch
 from sentence_transformers import SentenceTransformer
 
 from app.core.config import get_settings
@@ -25,6 +37,10 @@ _QUERY_INSTRUCTION = (
     "Instruct: Given a question about a software codebase, retrieve relevant "
     "code, API routes, or documentation that answer the question\nQuery:"
 )
+
+
+def _resolve_device() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 @lru_cache
@@ -37,7 +53,7 @@ def _get_model() -> SentenceTransformer:
         )
     return SentenceTransformer(
         settings.EMBEDDING_MODEL,
-        device="cpu",
+        device=_resolve_device(),
         processor_kwargs={"padding_side": "left"},
     )
 

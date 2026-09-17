@@ -11,13 +11,13 @@ import { wsBaseUrl } from "@/lib/ws";
 /** Mirrors `AnalysisRunStatus`'s non-terminal members, in the real declared
  * order (`server/app/models/analysis_run.py`). `AnalysisStep` renders its
  * stage checklist directly from this array — not a hand-picked subset —
- * so the UI never drifts from what the backend can actually report. Note
- * the currently-wired Celery pipeline (Phase 5.3) never actually emits
- * `indexing`/`generating_insights` (those are reserved for the future
- * RAG/embeddings phases) — a real run jumps straight from `building_graph`
- * to `completed`, so those two checklist rows will visibly skip from
- * "pending" to "done" rather than ever showing "running". That's the real
- * pipeline's actual behavior today, not a frontend bug. */
+ * so the UI never drifts from what the backend can actually report. As of
+ * Phase 7.5, `indexing` is a real stage the Celery pipeline emits
+ * (`app/rag/indexing.py::index_analysis_run`). `generating_insights` is
+ * still reserved for Phase 8 — a real run today still jumps straight from
+ * `indexing` to `completed`, so that one checklist row will visibly skip
+ * from "pending" to "done" rather than ever showing "running". That's the
+ * real pipeline's actual behavior today, not a frontend bug. */
 export const ANALYSIS_RUN_STAGES = [
   "queued",
   "cloning",

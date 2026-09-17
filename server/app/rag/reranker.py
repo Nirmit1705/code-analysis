@@ -11,10 +11,16 @@ against this specific prompt shape, so it isn't optional decoration. The
 `task` instruction is overridden from the card's "web search query" default
 to a codebase-appropriate one, for the same reason as
 `rag/embeddings.py`'s query instruction override.
+
+**Device (Phase 7.5 addendum):** uses CUDA when available, CPU otherwise —
+same `_resolve_device()` helper and rationale as `rag/embeddings.py`
+(duplicated, not imported, matching this codebase's established small-helper
+convention).
 """
 
 from functools import lru_cache
 
+import torch
 from sentence_transformers import CrossEncoder
 
 from app.core.config import get_settings
@@ -32,6 +38,10 @@ _QUERY_PREFIX = (
 _DOCUMENT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 
+def _resolve_device() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 @lru_cache
 def _get_model() -> CrossEncoder:
     settings = get_settings()
@@ -42,7 +52,7 @@ def _get_model() -> CrossEncoder:
         )
     return CrossEncoder(
         settings.RERANKER_MODEL,
-        device="cpu",
+        device=_resolve_device(),
         processor_kwargs={"padding_side": "left"},
     )
 

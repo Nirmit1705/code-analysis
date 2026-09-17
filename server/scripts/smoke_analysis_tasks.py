@@ -199,8 +199,8 @@ def run_happy_path() -> bool:
         all_passed = True
         all_passed &= _check("task returns status completed", result.get("status") == "completed", str(result))
         all_passed &= _check(
-            "event order == cloning/parsing/analyzing/building_graph/completed",
-            recorded_events == ["cloning", "parsing", "analyzing", "building_graph", "completed"],
+            "event order == cloning/parsing/analyzing/building_graph/indexing/completed",
+            recorded_events == ["cloning", "parsing", "analyzing", "building_graph", "indexing", "completed"],
             str(recorded_events),
         )
 

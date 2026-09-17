@@ -2,11 +2,13 @@
 
 `run_repository_analysis` (Phase 5.3) orchestrates one already-`QUEUED`
 `AnalysisRun`'s full lifecycle: `QUEUED -> CLONING -> PARSING -> ANALYZING ->
-BUILDING_GRAPH -> COMPLETED`, each transition committed to the DB and
-published as a Redis progress event (`services/progress_service.py`).
-`INDEXING`/`GENERATING_INSIGHTS` are reserved for Phase 7/8 — not touched
-here, even though the enum already defines them (Phase 4.1's own design,
-so the state machine wouldn't need a later migration).
+BUILDING_GRAPH -> INDEXING -> COMPLETED`, each transition committed to the
+DB and published as a Redis progress event (`services/progress_service.py`).
+`INDEXING` is real as of Phase 7.5 (`app/rag/indexing.py::index_analysis_run`,
+wrapped in its own non-fatal try/except below). `GENERATING_INSIGHTS` is
+still reserved for Phase 8 — not touched here, even though the enum already
+defines it (Phase 4.1's own design, so the state machine wouldn't need a
+later migration).
 
 Creates and closes its own DB session (`SessionLocal`) — there is no
 request/User context in a background task, and FastAPI's `get_db` generator
@@ -23,10 +25,11 @@ Does not create the `AnalysisRun` row itself (Phase 5.1's
 are called as-is, unmodified, at the two points this task's own job ends.
 As of Phase 7.1, `persist_analysis_run` no longer finalizes a run to
 `COMPLETED` itself (it returns the run plus its `file_id_by_path`/
-`symbol_id_by_symbol` lookup maps instead) — this task calls the new
-`finalize_analysis_run_completed` explicitly right after, so RAG indexing
-(Phase 7.5) has a place to run in between without the DB ever transiently
-reading `COMPLETED` mid-index.
+`symbol_id_by_symbol` lookup maps instead) — Phase 7.5's `index_analysis_run`
+runs in between, using those same two maps to resolve `RagChunk` FKs, and
+`finalize_analysis_run_completed` is called explicitly right after (whether
+indexing succeeded or not), so the DB never transiently reads `COMPLETED`
+mid-index.
 
 On any pipeline-level failure (token resolution, ingestion, parsing/
 analysis, or persistence), the run is marked `FAILED`
@@ -46,6 +49,7 @@ from app.analysis import ingestion, pipeline
 from app.core.database import SessionLocal
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.models.repository import Repository
+from app.rag.indexing import index_analysis_run
 from app.schemas.analysis import AnalysisProgressEvent
 from app.services import github_service
 from app.services.progress_service import publish_progress_event
@@ -140,17 +144,39 @@ def run_repository_analysis(analysis_run_id: str) -> dict:
             # Phase 5.1's own function, persists this run's facts (File/
             # Symbol/DependencyEdge/ApiEndpoint/DebtIssue) in one transaction
             # but no longer finalizes the run to COMPLETED itself (Phase 7.1
-            # split) — RAG indexing (Phase 7.5) runs in between, and
+            # split) — RAG indexing runs in between, and
             # finalize_analysis_run_completed below is the only place that
             # sets COMPLETED, called exactly once regardless of whether
             # indexing succeeds.
-            analysis_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
+            analysis_run, file_id_by_path, symbol_id_by_symbol = persist_analysis_run(
                 db, analysis_run=analysis_run, analysis_result=result
             )
 
-            # INDEXING/RAG wiring lands in Phase 7.5 — until then this is a
-            # direct, immediate finalize, matching the pre-Phase-7 behavior
-            # exactly (persist -> finalize, no stage in between yet).
+            _transition(AnalysisRunStatus.INDEXING)
+
+            # Non-fatal by design (docs/PHASE_7_PLAN.md decision #8): the
+            # core analysis this run already persisted above must never be
+            # lost over a failed embedding call (model load failure, OOM,
+            # a Hub-download hiccup). index_analysis_run itself raises
+            # normally on failure — this is the one place that turns that
+            # into "log and move on".
+            try:
+                chunk_count = index_analysis_run(
+                    db,
+                    analysis_run=analysis_run,
+                    analysis_result=result,
+                    file_id_by_path=file_id_by_path,
+                    symbol_id_by_symbol=symbol_id_by_symbol,
+                )
+                logger.info(
+                    "run_repository_analysis: %s indexed %d RagChunk rows", analysis_run_id, chunk_count
+                )
+            except Exception:  # noqa: BLE001 — indexing failure must never fail the whole run
+                logger.exception(
+                    "run_repository_analysis: %s RAG indexing failed (non-fatal — core analysis unaffected)",
+                    analysis_run_id,
+                )
+
             analysis_run = finalize_analysis_run_completed(db, analysis_run=analysis_run, repository=repository)
 
             publish_progress_event(
