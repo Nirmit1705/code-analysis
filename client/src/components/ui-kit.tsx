@@ -53,6 +53,13 @@ const toneMap = {
 
 export type Tone = keyof typeof toneMap;
 
+/** The raw CSS color behind a tone, for contexts (raw SVG `stroke`/`fill`
+ * attributes) that can't take a Tailwind class — the same value `ScoreBar`/
+ * `Ring`/`Sparkline` already use internally via `toneMap[tone].raw`. */
+export function toneColor(tone: Tone): string {
+  return toneMap[tone].raw;
+}
+
 export function Tag({
   children,
   tone = "neutral",
