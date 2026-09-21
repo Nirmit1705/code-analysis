@@ -16,14 +16,32 @@ to a codebase-appropriate one, for the same reason as
 same `_resolve_device()` helper and rationale as `rag/embeddings.py`
 (duplicated, not imported, matching this codebase's established small-helper
 convention).
+
+**OOM fallback (Phase 8.5 post-signoff addendum):** on a 6GB-VRAM laptop GPU,
+running both this model and `rag/embeddings.py`'s alongside real inference
+activations genuinely exhausts CUDA memory — reproduced live, not
+hypothetical (see `docs/PHASE_8_PLAN.md`'s 8.5 write-up). `score_candidates`
+clears the CUDA cache and retries once; if it still OOMs, it degrades to a
+rank-preserving fallback instead of raising, same "never raise, degrade
+honestly" stance as `assistant_service.py`'s malformed-response fallback and
+`insight_service.py`'s `LLMProviderError` handling. **Caught broader than
+`torch.cuda.OutOfMemoryError`, found live**: PyTorch only raises that specific
+subclass when its own caching allocator fails to reserve memory up front —
+an OOM surfacing *inside* a kernel launch (observed live inside
+`apply_rotary_pos_emb`'s elementwise ops, mid-forward-pass) instead raises a
+bare `RuntimeError("CUDA error: out of memory")`, which `except
+torch.cuda.OutOfMemoryError` does not catch. `_is_cuda_oom` matches both.
 """
 
 from functools import lru_cache
+import logging
 
 import torch
 from sentence_transformers import CrossEncoder
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _TASK_INSTRUCTION = (
     "Given a question about a software codebase, retrieve relevant code, API "
@@ -40,6 +58,10 @@ _DOCUMENT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 def _resolve_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _is_cuda_oom(exc: RuntimeError) -> bool:
+    return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
 
 @lru_cache
@@ -66,10 +88,30 @@ def _format_document(document: str) -> str:
 
 
 def score_candidates(query: str, candidates: list[str]) -> list[float]:
-    """Score each candidate's relevance to `query`. Parallel to `candidates`, sigmoid in [0, 1]."""
+    """Score each candidate's relevance to `query`. Parallel to `candidates`,
+    sigmoid in [0, 1] on success. On CUDA OOM, clears the cache and retries
+    once; if it OOMs again, skips reranking for this call and returns a
+    rank-preserving fallback (descending placeholder scores in `candidates`'
+    own input order) instead of raising — `candidates` arrives already
+    RRF-ranked by `retrieval.py`, so this degrades to "no rerank," never to
+    a crashed request."""
     if not candidates:
         return []
     pairs = [[_format_query(query), _format_document(doc)] for doc in candidates]
-    scores = _get_model().predict(pairs).tolist()
+    try:
+        scores = _get_model().predict(pairs).tolist()
+    except RuntimeError as exc:
+        if not _is_cuda_oom(exc):
+            raise
+        logger.warning("Reranker CUDA OOM — clearing cache and retrying once")
+        torch.cuda.empty_cache()
+        try:
+            scores = _get_model().predict(pairs).tolist()
+        except RuntimeError as retry_exc:
+            if not _is_cuda_oom(retry_exc):
+                raise
+            logger.warning("Reranker CUDA OOM again after retry — skipping rerank for this call")
+            torch.cuda.empty_cache()
+            return [1.0 - i / len(candidates) for i in range(len(candidates))]
     assert len(scores) == len(candidates)
     return scores
