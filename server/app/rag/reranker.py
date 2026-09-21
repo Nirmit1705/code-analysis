@@ -34,14 +34,16 @@ torch.cuda.OutOfMemoryError` does not catch. `_is_cuda_oom` matches both.
 This fallback stays in place even after the fp16 change below — fp16 makes
 OOM much less likely, not impossible.
 
-**fp16 trial (same day, post-OOM-fix)**: fp32 weights for this model plus
+**fp16 (same day, post-OOM-fix)**: fp32 weights for this model plus
 `rag/embeddings.py`'s together (~4.8GB) left so little headroom that even a
 successful (non-OOM) call thrashed severely — 150-220s wall-clock for one
 chat question that should take a few seconds, measured live against real
 `Nirmit1705/HireSight` questions. Loading both models in fp16 instead
-(`_resolve_dtype`, CUDA-only) roughly halves that combined footprint; see
-`docs/PHASE_8_PLAN.md`'s 8.5 write-up for the fp32-vs-fp16 timing comparison
-once recorded.
+(`_resolve_dtype`, CUDA-only) roughly halves that combined footprint,
+confirmed live: the same two questions dropped to 63.5s (cold) and 13.1s
+(warm), zero OOM warnings, same real files cited. See `docs/PHASE_8_PLAN.md`'s
+8.5 write-up and Known Issue #23 in `docs/BACKEND_IMPLEMENTATION_PLAN.md`
+for the full comparison.
 """
 
 from functools import lru_cache
