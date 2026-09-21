@@ -68,7 +68,7 @@ from app.models.file import File  # noqa: E402
 from app.models.repository import Repository, RepositoryAnalysisStatus  # noqa: E402
 from app.models.symbol import Symbol as SymbolRow  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.services import github_service  # noqa: E402
+from app.services import github_service, insight_service  # noqa: E402
 from app.services.repo_service import create_queued_analysis_run  # noqa: E402
 from app.workers.celery_app import celery_app  # noqa: E402
 
@@ -166,6 +166,22 @@ class _Patch:
         setattr(self._obj, self._attr, self._original)
 
 
+def _stub_insight_provider_class(response_text: str):
+    """Phase 8.4: every group below that now reaches `GENERATING_INSIGHTS`
+    also patches `insight_service.GroqProvider` to this stub — without it,
+    a "gating, offline" group here would silently start making a real Groq
+    API call, breaking this script's own documented "no live GitHub, no
+    reachable Celery broker" offline contract (a real network dependency is
+    a materially different kind of "live" than Phase 7.5's local-model
+    embedding calls, which stayed offline-compatible)."""
+
+    class _Stub:
+        def complete(self, *, system, messages, response_schema=None):
+            return response_text
+
+    return _Stub
+
+
 # --- group 1: happy path ---------------------------------------------------------
 
 
@@ -176,10 +192,12 @@ def run_happy_path() -> bool:
     def fake_publish(analysis_run_id, event):
         recorded_events.append(event.status)
 
+    stub_insights_response = '{"insights": [{"tone": "info", "title": "Stub insight", "body": "A fixed, deterministic insight for offline verification."}]}'
     patches = [
         _Patch(github_service, "get_installation_access_token", lambda installation_id: {"token": "fake-token"}),
         _Patch(ingestion_module, "ingest_repository", _fake_ingest_repository),
         _Patch(analysis_tasks, "publish_progress_event", fake_publish),
+        _Patch(insight_service, "GroqProvider", _stub_insight_provider_class(stub_insights_response)),
     ]
 
     db = SessionLocal()
@@ -199,13 +217,19 @@ def run_happy_path() -> bool:
         all_passed = True
         all_passed &= _check("task returns status completed", result.get("status") == "completed", str(result))
         all_passed &= _check(
-            "event order == cloning/parsing/analyzing/building_graph/indexing/completed",
-            recorded_events == ["cloning", "parsing", "analyzing", "building_graph", "indexing", "completed"],
+            "event order == cloning/parsing/analyzing/building_graph/indexing/generating_insights/completed",
+            recorded_events
+            == ["cloning", "parsing", "analyzing", "building_graph", "indexing", "generating_insights", "completed"],
             str(recorded_events),
         )
 
         db.refresh(queued)
         all_passed &= _check("AnalysisRun.status == COMPLETED", queued.status is AnalysisRunStatus.COMPLETED)
+        all_passed &= _check(
+            "ai_insights persisted from the stub provider's response (Phase 8.4)",
+            queued.ai_insights == [{"tone": "info", "title": "Stub insight", "body": "A fixed, deterministic insight for offline verification."}],
+            str(queued.ai_insights),
+        )
 
         file_count = db.execute(
             select(func.count()).select_from(File).where(File.analysis_run_id == queued.id)
@@ -245,6 +269,7 @@ def run_per_file_failure() -> bool:
         _Patch(github_service, "get_installation_access_token", lambda installation_id: {"token": "fake-token"}),
         _Patch(ingestion_module, "ingest_repository", _fake_ingest_repository),
         _Patch(analysis_tasks, "publish_progress_event", lambda analysis_run_id, event: None),
+        _Patch(insight_service, "GroqProvider", _stub_insight_provider_class('{"insights": []}')),
     ]
     # _SYMBOL_EXTRACTORS is a dict, not an object _Patch's getattr/setattr can
     # target — patched and restored by hand instead.

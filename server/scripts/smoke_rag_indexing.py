@@ -80,7 +80,7 @@ from app.models.file import File  # noqa: E402
 from app.models.rag_chunk import EMBEDDING_DIM, RagChunk  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
 from app.rag import indexing  # noqa: E402
-from app.services import github_service  # noqa: E402
+from app.services import github_service, insight_service  # noqa: E402
 from app.services.repo_service import (  # noqa: E402
     create_queued_analysis_run,
     finalize_analysis_run_completed,
@@ -121,6 +121,20 @@ class _Patch:
 
     def restore(self) -> None:
         setattr(self._obj, self._attr, self._original)
+
+
+def _stub_insight_provider_class(response_text: str):
+    """Phase 8.4: group 4 below now reaches `GENERATING_INSIGHTS` too —
+    patches `insight_service.GroqProvider` to this stub so it stays
+    offline (same rationale as `smoke_analysis_tasks.py`'s own copy of
+    this helper: a real Groq call would break this group's documented
+    "offline and fast" classification)."""
+
+    class _Stub:
+        def complete(self, *, system, messages, response_schema=None):
+            return response_text
+
+    return _Stub
 
 
 def _random_vector() -> list[float]:
@@ -379,6 +393,7 @@ def run_task_level_non_fatal_indexing_failure() -> bool:
         _Patch(ingestion_module, "ingest_repository", _fake_ingest_repository),
         _Patch(analysis_tasks, "publish_progress_event", fake_publish),
         _Patch(indexing, "embed_documents", _raising_embed),
+        _Patch(insight_service, "GroqProvider", _stub_insight_provider_class('{"insights": []}')),
     ]
 
     db = SessionLocal()
@@ -410,8 +425,9 @@ def run_task_level_non_fatal_indexing_failure() -> bool:
         all_passed &= _check("File rows persisted despite the indexing failure", file_count > 0, str(file_count))
 
         all_passed &= _check(
-            "event order == cloning/parsing/analyzing/building_graph/indexing/completed",
-            recorded_events == ["cloning", "parsing", "analyzing", "building_graph", "indexing", "completed"],
+            "event order == cloning/parsing/analyzing/building_graph/indexing/generating_insights/completed",
+            recorded_events
+            == ["cloning", "parsing", "analyzing", "building_graph", "indexing", "generating_insights", "completed"],
             str(recorded_events),
         )
 
