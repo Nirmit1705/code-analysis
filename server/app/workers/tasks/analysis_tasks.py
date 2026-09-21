@@ -2,13 +2,12 @@
 
 `run_repository_analysis` (Phase 5.3) orchestrates one already-`QUEUED`
 `AnalysisRun`'s full lifecycle: `QUEUED -> CLONING -> PARSING -> ANALYZING ->
-BUILDING_GRAPH -> INDEXING -> COMPLETED`, each transition committed to the
-DB and published as a Redis progress event (`services/progress_service.py`).
-`INDEXING` is real as of Phase 7.5 (`app/rag/indexing.py::index_analysis_run`,
-wrapped in its own non-fatal try/except below). `GENERATING_INSIGHTS` is
-still reserved for Phase 8 — not touched here, even though the enum already
-defines it (Phase 4.1's own design, so the state machine wouldn't need a
-later migration).
+BUILDING_GRAPH -> INDEXING -> GENERATING_INSIGHTS -> COMPLETED`, each
+transition committed to the DB and published as a Redis progress event
+(`services/progress_service.py`). `INDEXING` is real as of Phase 7.5
+(`app/rag/indexing.py::index_analysis_run`); `GENERATING_INSIGHTS` is real
+as of Phase 8.4 (`app/services/insight_service.py::generate_insights`) —
+both wrapped in their own non-fatal try/except below, in that order.
 
 Creates and closes its own DB session (`SessionLocal`) — there is no
 request/User context in a background task, and FastAPI's `get_db` generator
@@ -51,7 +50,7 @@ from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.models.repository import Repository
 from app.rag.indexing import index_analysis_run
 from app.schemas.analysis import AnalysisProgressEvent
-from app.services import github_service
+from app.services import github_service, insight_service
 from app.services.progress_service import publish_progress_event
 from app.services.repo_service import finalize_analysis_run_completed, mark_analysis_run_failed, persist_analysis_run
 from app.workers.celery_app import celery_app
@@ -174,6 +173,26 @@ def run_repository_analysis(analysis_run_id: str) -> dict:
             except Exception:  # noqa: BLE001 — indexing failure must never fail the whole run
                 logger.exception(
                     "run_repository_analysis: %s RAG indexing failed (non-fatal — core analysis unaffected)",
+                    analysis_run_id,
+                )
+
+            _transition(AnalysisRunStatus.GENERATING_INSIGHTS)
+
+            # Non-fatal by design (docs/PHASE_8_PLAN.md decision #9), mirroring
+            # indexing's own try/except immediately above: a broken insights
+            # call must never fail the run or cost any already-persisted
+            # analysis fact. `generate_insights` itself already never raises
+            # (returns [] on any failure) — this try/except is defense in
+            # depth against an unexpected exception in the surrounding query
+            # code, not something expected to actually fire in practice.
+            try:
+                analysis_run.ai_insights = insight_service.generate_insights(db, analysis_run=analysis_run)
+                db.add(analysis_run)
+                db.commit()
+            except Exception:  # noqa: BLE001 — insight generation failure must never fail the whole run
+                logger.exception(
+                    "run_repository_analysis: %s AI insight generation failed "
+                    "(non-fatal — core analysis unaffected)",
                     analysis_run_id,
                 )
 

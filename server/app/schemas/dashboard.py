@@ -69,6 +69,19 @@ class RecentCommit(BaseModel):
     date: datetime
 
 
+AiInsightTone = Literal["danger", "warning", "info"]
+
+
+class AiInsightSchema(BaseModel):
+    """One entry of `AnalysisRun.ai_insights` (Phase 8.4) — mirrors
+    `insight_service.generate_insights`'s own validated `{tone, title,
+    body}` dict shape exactly."""
+
+    tone: AiInsightTone
+    title: str
+    body: str
+
+
 class DashboardRead(BaseModel):
     """`analyzed=False` is the full "not analyzed yet" response — every
     other field left at its empty/`None` default rather than a broken
@@ -83,6 +96,8 @@ class DashboardRead(BaseModel):
     languages: list[LanguageBreakdown] = []
     health_metrics: list[HealthMetric] = []
     recent_commits: list[RecentCommit] = []
-    # Hard rule, not a placeholder: always `[]` until Phase 8 exists to
-    # generate real insights — never fake AI text just to fill the screen.
-    ai_insights: list[str] = []
+    # Phase 8.4: real, LLM-generated insights, cached on `AnalysisRun
+    # .ai_insights` and read back verbatim — `[]` is still a real, honest
+    # outcome (insight generation failed non-fatally, or the LLM genuinely
+    # found nothing worth surfacing), not a placeholder rule anymore.
+    ai_insights: list[AiInsightSchema] = []

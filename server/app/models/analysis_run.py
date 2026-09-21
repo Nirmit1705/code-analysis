@@ -4,8 +4,8 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -79,6 +79,15 @@ class AnalysisRun(Base):
     # runs will have no Prisma schema at all, and that's a real "no
     # evidence" outcome, not a data gap to backfill.
     database_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Phase 8.4: a plain JSONB list of `{tone, title, body}` dicts, generated
+    # once per run by `insight_service.py::generate_insights` (design
+    # decision #7 — no separate `AiInsight` child table, same precedent as
+    # `debt_score` above). `[]` both as the Python-level default for a
+    # freshly-constructed row and as the DB-level default for every
+    # pre-Phase-8 row this migration touches.
+    ai_insights: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
