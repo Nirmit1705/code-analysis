@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Sparkles, ArrowUp, FileCode2, Plus, History } from "lucide-react";
 
 import { Panel, PanelHeader, Tag } from "@/components/ui-kit";
@@ -51,21 +51,85 @@ function referenceLabel(ref: Reference): string {
   return `${location}:${ref.line_start}-${ref.line_end}`;
 }
 
-/** Plain-text paragraph rendering — no markdown parsing (design decision
- * #10: no new markdown dependency). Blank lines (from the model's own
- * `\n\n` paragraph breaks) are dropped; the gap comes from spacing between
- * the remaining `<p>`s instead of rendering an empty line. */
+/** Handles inline code spans, **bold**, and *italic* — the markdown
+ * constructs the model's answers actually use — without a markdown-parsing
+ * dependency (design decision #10 stays intact; this is a small local
+ * formatter, not a parser). Anything else (lists, links, headings) still
+ * renders as plain text, same as before. `code` reuses the exact `mono
+ * text-violet-soft` styling the old mock's own inline-code spans used.
+ * `**bold**` is matched before `*italic*` in the alternation so a bold
+ * span's own asterisks are never mistaken for an italic one. */
+function renderInlineMarkdown(line: string): ReactNode[] {
+  const parts = line.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+      return (
+        <code key={i} className="mono text-violet-soft">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 3) {
+      return (
+        <strong key={i} className="font-semibold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 1) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+/** `- `/`* `-prefixed lines (a required space after the marker, so this
+ * never fires on an opening `*italic*` span, which has no space after its
+ * `*`) are grouped into a real `<ul>` instead of rendering as bare
+ * characters with no indentation. Everything else stays a plain `<p>` with
+ * light inline formatting (see `renderInlineMarkdown`). Blank lines (from
+ * the model's own `\n\n` paragraph breaks) are dropped; the gap comes from
+ * spacing between blocks instead of rendering an empty line. */
+function renderAnswerBody(text: string): ReactNode[] {
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  const blocks: ReactNode[] = [];
+  let currentList: string[] = [];
+
+  const flushList = () => {
+    if (currentList.length === 0) return;
+    blocks.push(
+      <ul
+        key={blocks.length}
+        className={cn("list-disc space-y-1 pl-5", blocks.length > 0 && "mt-2")}
+      >
+        {currentList.map((item, i) => (
+          <li key={i}>{renderInlineMarkdown(item)}</li>
+        ))}
+      </ul>,
+    );
+    currentList = [];
+  };
+
+  for (const line of lines) {
+    const bulletMatch = /^[-*]\s+(.+)/.exec(line.trim());
+    if (bulletMatch) {
+      currentList.push(bulletMatch[1]);
+      continue;
+    }
+    flushList();
+    blocks.push(
+      <p key={blocks.length} className={blocks.length > 0 ? "mt-2" : undefined}>
+        {renderInlineMarkdown(line)}
+      </p>,
+    );
+  }
+  flushList();
+
+  return blocks;
+}
+
 function AnswerText({ text }: { text: string }) {
-  const paragraphs = text.split("\n").filter((line) => line.trim().length > 0);
-  return (
-    <>
-      {paragraphs.map((line, i) => (
-        <p key={i} className={i > 0 ? "mt-2" : undefined}>
-          {line}
-        </p>
-      ))}
-    </>
-  );
+  return <>{renderAnswerBody(text)}</>;
 }
 
 function Assistant() {
