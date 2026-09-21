@@ -43,6 +43,18 @@ def _resolve_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _resolve_dtype(device: str) -> torch.dtype:
+    """fp16 on CUDA only — CPU fp16 kernels are slow/partially unsupported
+    for many ops in PyTorch, so fp32 stays the CPU default. Trial run
+    (2026-09-21, per `docs/PHASE_8_PLAN.md`'s 8.5 write-up): fp32 weights for
+    both this model and the reranker together (~4.8GB) left almost no
+    headroom on a 6GB laptop GPU, causing severe thrashing (150-220s for a
+    single chat question that should take a few seconds) and, before a
+    separate defensive fix, occasional outright CUDA OOM crashes. fp16
+    roughly halves combined weight memory (~2.4GB)."""
+    return torch.float16 if device == "cuda" else torch.float32
+
+
 @lru_cache
 def _get_model() -> SentenceTransformer:
     settings = get_settings()
@@ -51,9 +63,11 @@ def _get_model() -> SentenceTransformer:
             f"EMBEDDING_PROVIDER={settings.EMBEDDING_PROVIDER!r} is not supported — "
             "only 'local' is implemented (app/rag/embeddings.py)"
         )
+    device = _resolve_device()
     return SentenceTransformer(
         settings.EMBEDDING_MODEL,
-        device=_resolve_device(),
+        device=device,
+        model_kwargs={"torch_dtype": _resolve_dtype(device)},
         processor_kwargs={"padding_side": "left"},
     )
 

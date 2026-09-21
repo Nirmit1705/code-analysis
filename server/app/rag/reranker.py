@@ -31,6 +31,17 @@ an OOM surfacing *inside* a kernel launch (observed live inside
 `apply_rotary_pos_emb`'s elementwise ops, mid-forward-pass) instead raises a
 bare `RuntimeError("CUDA error: out of memory")`, which `except
 torch.cuda.OutOfMemoryError` does not catch. `_is_cuda_oom` matches both.
+This fallback stays in place even after the fp16 change below — fp16 makes
+OOM much less likely, not impossible.
+
+**fp16 trial (same day, post-OOM-fix)**: fp32 weights for this model plus
+`rag/embeddings.py`'s together (~4.8GB) left so little headroom that even a
+successful (non-OOM) call thrashed severely — 150-220s wall-clock for one
+chat question that should take a few seconds, measured live against real
+`Nirmit1705/HireSight` questions. Loading both models in fp16 instead
+(`_resolve_dtype`, CUDA-only) roughly halves that combined footprint; see
+`docs/PHASE_8_PLAN.md`'s 8.5 write-up for the fp32-vs-fp16 timing comparison
+once recorded.
 """
 
 from functools import lru_cache
@@ -60,6 +71,13 @@ def _resolve_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _resolve_dtype(device: str) -> torch.dtype:
+    """fp16 on CUDA only, same rationale as `rag/embeddings.py::_resolve_dtype`
+    (duplicated, not imported — this codebase's established small-helper
+    convention) — this model is the one that was actually observed OOMing."""
+    return torch.float16 if device == "cuda" else torch.float32
+
+
 def _is_cuda_oom(exc: RuntimeError) -> bool:
     return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
@@ -72,9 +90,11 @@ def _get_model() -> CrossEncoder:
             f"RERANKER_PROVIDER={settings.RERANKER_PROVIDER!r} is not supported — "
             "only 'local' is implemented (app/rag/reranker.py)"
         )
+    device = _resolve_device()
     return CrossEncoder(
         settings.RERANKER_MODEL,
-        device=_resolve_device(),
+        device=device,
+        model_kwargs={"torch_dtype": _resolve_dtype(device)},
         processor_kwargs={"padding_side": "left"},
     )
 
