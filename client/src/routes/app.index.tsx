@@ -4,7 +4,7 @@ import { RefreshCw, Sparkles, GitBranch, ArrowUpRight, ChevronsUpDown } from "lu
 import { formatDistanceToNow } from "date-fns";
 
 import { ArchGraph } from "@/components/arch-graph";
-import { Panel, PanelHeader, Ring, StatCell, Tag } from "@/components/ui-kit";
+import { Panel, PanelHeader, Ring, StatCell, Tag, toneColor } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
 import { layoutNodes, toArchGraphEdges } from "@/lib/graph-layout";
 import { useArchitecture, type ArchitectureRead } from "@/lib/queries/architecture";
@@ -249,10 +249,29 @@ function DashboardBody({
               subtitle="generated from the current analysis"
               icon={<Sparkles className="size-3.5" />}
             />
-            <div className="p-3">
-              <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-4 text-center text-[12px] text-subtle">
-                AI-generated insights will appear here once the assistant is wired up.
-              </p>
+            <div className="space-y-2 p-3">
+              {data.ai_insights.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-4 text-center text-[12px] text-subtle">
+                  No AI insights for this analysis — either none were generated, or the repository
+                  has nothing notable to flag right now.
+                </p>
+              ) : (
+                data.ai_insights.map((insight, i) => (
+                  <div
+                    key={i}
+                    className="rounded-md border border-border bg-surface-2/40 p-3"
+                    style={{ borderLeftColor: toneColor(insight.tone), borderLeftWidth: 3 }}
+                  >
+                    <div className="mb-1 flex items-center gap-2">
+                      <Tag tone={insight.tone}>{insight.tone}</Tag>
+                      <p className="text-[12.5px] font-medium">{insight.title}</p>
+                    </div>
+                    <p className="text-[12px] leading-relaxed text-secondary-foreground">
+                      {insight.body}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
           </Panel>
 

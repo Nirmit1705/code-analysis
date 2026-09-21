@@ -3,130 +3,107 @@ import { useState } from "react";
 import { Sparkles, ArrowUp, FileCode2, Plus, History } from "lucide-react";
 
 import { Panel, PanelHeader, Tag } from "@/components/ui-kit";
-import { suggestedQuestions, repo } from "@/lib/repo-data";
+import { ApiError } from "@/lib/api";
+import { useActiveRepositoryId } from "@/lib/active-repo";
+import {
+  useSendAssistantMessage,
+  useSuggestedQuestions,
+  type Reference,
+} from "@/lib/queries/assistant";
+import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/assistant")({
   head: () => ({
     meta: [
       { title: "AI Codebase Assistant — Substrate" },
-      { name: "description", content: "Ask questions about your repository and get answers grounded in real files, with every citation linked to source." },
+      {
+        name: "description",
+        content:
+          "Ask questions about your repository and get answers grounded in real files, with every citation linked to source.",
+      },
       { property: "og:title", content: "AI Codebase Assistant — Substrate" },
-      { property: "og:description", content: "Repository-aware answers with file citations, not a generic chatbot." },
+      {
+        property: "og:description",
+        content: "Repository-aware answers with file citations, not a generic chatbot.",
+      },
     ],
   }),
   component: Assistant,
 });
 
-type Msg = { role: "user" | "ai"; text: React.ReactNode; refs?: string[]; scope?: string };
+type Msg =
+  | { role: "user"; text: string }
+  | {
+      role: "ai";
+      text: string;
+      scope?: string;
+      refs?: Reference[];
+      followUps?: string[];
+      error?: boolean;
+    };
 
-const seeded: Msg[] = [
-  { role: "user", text: "How does authentication work?" },
-  {
-    role: "ai",
-    scope: "9 files read · auth module",
-    text: (
-      <>
-        Authentication begins in <code className="mono text-violet-soft">auth.controller.ts</code>, which validates the
-        request DTO and delegates to <code className="mono text-violet-soft">AuthService</code>. The service verifies
-        credentials with bcrypt, then mints a 15-minute access token and a refresh token; the refresh token is stored in
-        Redis under <code className="mono text-violet-soft">session:&lt;token&gt;</code>.
-        <br />
-        <br />
-        On every subsequent request the gateway forwards the bearer token to{" "}
-        <code className="mono text-violet-soft">jwt.strategy.ts</code>, which verifies the signature and resolves the
-        organization claim. <code className="mono text-violet-soft">auth.guard.ts</code> then enforces route scopes such
-        as <code className="mono text-cyan">org:admin</code>.
-        <br />
-        <br />
-        Two things worth knowing: the Redis session TTL (24h) outlives the access token, so a revoked session can still
-        resolve until expiry; and three non-identity services import AuthService directly rather than consuming the
-        published guard.
-      </>
-    ),
-    refs: ["auth.controller.ts", "auth.service.ts", "jwt.strategy.ts", "auth.guard.ts", "redis.ts"],
-  },
-];
+/** `file_path` first, `symbol_name` (when the chunk resolved to one) and
+ * the real line range after — every field comes straight off the backend's
+ * `Reference`, never parsed out of the answer's own text (design decision #4). */
+function referenceLabel(ref: Reference): string {
+  const location = ref.symbol_name ? `${ref.file_path} · ${ref.symbol_name}` : ref.file_path;
+  return `${location}:${ref.line_start}-${ref.line_end}`;
+}
 
-const canned: Record<string, Msg> = {
-  "Trace the payment flow.": {
-    role: "ai",
-    scope: "6 files read · billing module",
-    text: (
-      <>
-        Checkout starts on <code className="mono text-violet-soft">settings.billing.tsx</code> and posts to{" "}
-        <code className="mono text-cyan">POST /api/billing/checkout</code>, guarded by{" "}
-        <code className="mono text-violet-soft">auth.guard.ts</code> with the <code className="mono text-cyan">org:admin</code>{" "}
-        scope. <code className="mono text-violet-soft">BillingService.createCheckoutSession()</code> resolves the Stripe
-        customer, applies proration and returns a hosted checkout URL. Fulfilment happens asynchronously in{" "}
-        <code className="mono text-violet-soft">webhooks/stripe.ts</code>, which is signature-verified but not idempotent —
-        duplicate deliveries can double-count seats.
-      </>
-    ),
-    refs: ["settings.billing.tsx", "billing.controller.ts", "billing.service.ts", "stripe.ts", "webhooks/stripe.ts"],
-  },
-  "Where is Redis used?": {
-    role: "ai",
-    scope: "12 files read · 4 modules",
-    text: (
-      <>
-        Redis is accessed only through <code className="mono text-violet-soft">packages/cache/src/redis.ts</code> and is
-        used for three concerns: refresh-token sessions (Auth Service), rate-limit counters (API Gateway) and BullMQ
-        transcript queues (Interview Service). <code className="mono text-violet-soft">scheduler.ts</code> creates a
-        connection per request instead of using the shared pool, which is the main source of latency above 200 rps.
-      </>
-    ),
-    refs: ["redis.ts", "queues.ts", "auth.service.ts", "rate-limit.ts", "scheduler.ts"],
-  },
-  "Which modules depend on UserService?": {
-    role: "ai",
-    scope: "graph query · 1,912 edges",
-    text: (
-      <>
-        Seven modules import <code className="mono text-violet-soft">UserService</code>: auth, interview, billing,
-        notification, analytics-gateway, admin-console and the seeding CLI. Of those, notification and analytics only use{" "}
-        <code className="mono text-violet-soft">findById()</code> — candidates for a narrower read interface.
-      </>
-    ),
-    refs: ["user.service.ts", "user.repository.ts", "auth.service.ts", "notification.service.ts"],
-  },
-  "What happens when a user registers?": {
-    role: "ai",
-    scope: "8 files read · trace built",
-    text: (
-      <>
-        The registration form posts to <code className="mono text-cyan">POST /api/register</code> (rate limited 5/60s).
-        AuthController maps the DTO, AuthService hashes the password at bcrypt cost 12 and{" "}
-        <code className="mono text-violet-soft">UserRepository.insert()</code> writes users and org_members in one
-        transaction. A database trigger emits an audit_log row the analytics worker later aggregates. Open the Feature
-        Tracer for the full path.
-      </>
-    ),
-    refs: ["register.tsx", "auth.controller.ts", "auth.service.ts", "user.repository.ts", "schema.prisma"],
-  },
-};
+/** Plain-text paragraph rendering — no markdown parsing (design decision
+ * #10: no new markdown dependency). Blank lines (from the model's own
+ * `\n\n` paragraph breaks) are dropped; the gap comes from spacing between
+ * the remaining `<p>`s instead of rendering an empty line. */
+function AnswerText({ text }: { text: string }) {
+  const paragraphs = text.split("\n").filter((line) => line.trim().length > 0);
+  return (
+    <>
+      {paragraphs.map((line, i) => (
+        <p key={i} className={i > 0 ? "mt-2" : undefined}>
+          {line}
+        </p>
+      ))}
+    </>
+  );
+}
 
 function Assistant() {
-  const [messages, setMessages] = useState<Msg[]>(seeded);
+  const activeRepositoryId = useActiveRepositoryId();
+  const repositories = useRepositories();
+  const activeRepository = repositories.data?.find((r) => r.id === activeRepositoryId) ?? null;
+  const suggested = useSuggestedQuestions(activeRepositoryId);
+  const sendMessage = useSendAssistantMessage(activeRepositoryId ?? "");
+
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
 
-  const ask = (q: string) => {
-    const answer =
-      canned[q] ??
-      ({
-        role: "ai",
-        scope: "18,402 chunks searched",
-        text: (
-          <>
-            I searched the indexed repository for <span className="text-foreground">“{q}”</span>. The closest relevant
-            modules are the Auth Service and API Gateway. Open the referenced files to continue, or narrow the question to
-            a module, endpoint or symbol name.
-          </>
-        ),
-        refs: ["auth.service.ts", "server.ts", "rate-limit.ts"],
-      } as Msg);
-    setMessages((m) => [...m, { role: "user", text: q }, answer]);
+  const ask = async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed || !activeRepositoryId || sendMessage.isPending) return;
+
+    setMessages((m) => [...m, { role: "user", text: trimmed }]);
     setInput("");
+
+    try {
+      const result = await sendMessage.mutateAsync(trimmed);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "ai",
+          text: result.answer,
+          scope: `${result.references.length} reference${result.references.length === 1 ? "" : "s"}`,
+          refs: result.references,
+          followUps: result.follow_up_questions,
+        },
+      ]);
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : "Something went wrong answering that — please try again.";
+      setMessages((m) => [...m, { role: "ai", text: message, error: true }]);
+    }
   };
 
   return (
@@ -135,63 +112,139 @@ function Assistant() {
         <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
           <Sparkles className="size-3.5 text-violet-soft" />
           <h1 className="text-[13px] font-semibold">AI Codebase Assistant</h1>
-          <Tag tone="violet" mono>{repo.short} · main</Tag>
-          <span className="ml-auto font-mono text-[11px] text-subtle">context: 3,184 files · 18,402 chunks</span>
+          {activeRepository ? (
+            <Tag tone="violet" mono>
+              {activeRepository.full_name} · {activeRepository.default_branch}
+            </Tag>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5">
           <div className="mx-auto max-w-3xl space-y-4">
+            {!activeRepositoryId ? (
+              <div className="p-10 text-center">
+                <p className="text-[13px] text-subtle">No repository connected yet.</p>
+                <Link
+                  to="/onboarding"
+                  className="focus-ring mt-2 inline-block text-[12.5px] text-violet-soft hover:underline"
+                >
+                  Connect a repository
+                </Link>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="p-10 text-center">
+                <p className="text-[13px] text-subtle">
+                  Ask anything about this repository — a module, an endpoint, a symbol, or how
+                  something works.
+                </p>
+              </div>
+            ) : null}
+
             {messages.map((m, i) =>
               m.role === "user" ? (
-                <div key={i} className="ml-auto w-fit max-w-[80%] rounded-lg rounded-br-sm border border-border bg-surface-2 px-3.5 py-2.5 text-[13px]">
+                <div
+                  key={i}
+                  className="ml-auto w-fit max-w-[80%] rounded-lg rounded-br-sm border border-border bg-surface-2 px-3.5 py-2.5 text-[13px]"
+                >
                   {m.text}
                 </div>
               ) : (
-                <div key={i} className="rounded-lg border border-violet/20 bg-violet/[0.055] p-4">
-                  <p className="mb-2 flex items-center gap-1.5 text-[11px] tracking-wide text-violet-soft uppercase">
-                    <span className="size-1.5 rounded-full bg-violet pulse-node" /> Substrate
-                    {m.scope ? <span className="ml-1 font-mono text-[10.5px] normal-case text-subtle">{m.scope}</span> : null}
+                <div
+                  key={i}
+                  className={cn(
+                    "rounded-lg border p-4",
+                    m.error
+                      ? "border-danger/25 bg-danger/[0.06]"
+                      : "border-violet/20 bg-violet/[0.055]",
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "mb-2 flex items-center gap-1.5 text-[11px] tracking-wide uppercase",
+                      m.error ? "text-danger" : "text-violet-soft",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        m.error ? "bg-danger" : "bg-violet pulse-node",
+                      )}
+                    />
+                    Substrate
+                    {m.scope ? (
+                      <span className="ml-1 font-mono text-[10.5px] normal-case text-subtle">
+                        {m.scope}
+                      </span>
+                    ) : null}
                   </p>
-                  <div className="text-[13px] leading-relaxed text-secondary-foreground">{m.text}</div>
-                  {m.refs ? (
+                  <div className="text-[13px] leading-relaxed text-secondary-foreground">
+                    <AnswerText text={m.text} />
+                  </div>
+                  {m.refs && m.refs.length > 0 ? (
                     <div className="mt-3 border-t border-violet/15 pt-3">
                       <p className="label-xs mb-1.5">Referenced files</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {m.refs.map((f) => (
+                        {m.refs.map((ref, refIndex) => (
                           <Link
-                            key={f}
+                            key={`${ref.file_path}-${ref.line_start}-${refIndex}`}
                             to="/app/codebase"
                             className="focus-ring flex items-center gap-1.5 rounded-sm border border-border bg-surface px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-violet/40 hover:text-foreground"
                           >
-                            <FileCode2 className="size-3 text-violet-soft" /> {f}
+                            <FileCode2 className="size-3 text-violet-soft" /> {referenceLabel(ref)}
                           </Link>
                         ))}
                       </div>
                     </div>
                   ) : null}
+                  {m.followUps && m.followUps.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-violet/15 pt-3">
+                      {m.followUps.map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => ask(q)}
+                          disabled={sendMessage.isPending}
+                          className="focus-ring rounded-full border border-violet/25 bg-surface px-2.5 py-1 text-[11.5px] text-violet-soft transition-colors hover:border-violet/45 hover:bg-violet/10 disabled:opacity-50"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ),
             )}
+
+            {sendMessage.isPending ? (
+              <div className="rounded-lg border border-violet/20 bg-violet/[0.055] p-4">
+                <p className="flex items-center gap-1.5 text-[11px] tracking-wide text-violet-soft uppercase">
+                  <span className="size-1.5 rounded-full bg-violet pulse-node" /> Substrate
+                </p>
+                <p className="mt-2 text-[13px] text-subtle">Thinking…</p>
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div className="border-t border-border p-3">
           <div className="mx-auto max-w-3xl">
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {suggestedQuestions.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => ask(q)}
-                  className="focus-ring rounded-full border border-border bg-surface px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-violet/40 hover:text-foreground"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
+            {suggested.data && suggested.data.questions.length > 0 ? (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {suggested.data.questions.map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => ask(q)}
+                    disabled={sendMessage.isPending}
+                    className="focus-ring rounded-full border border-border bg-surface px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-violet/40 hover:text-foreground disabled:opacity-50"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (input.trim()) ask(input.trim());
+                ask(input);
               }}
               className={cn(
                 "flex items-end gap-2 rounded-lg border border-border bg-surface p-2 focus-within:border-violet/45",
@@ -201,12 +254,18 @@ function Assistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 rows={2}
-                placeholder="Ask about a module, endpoint, symbol or workflow…"
-                className="max-h-32 min-h-9 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] outline-none placeholder:text-subtle"
+                disabled={!activeRepositoryId}
+                placeholder={
+                  activeRepositoryId
+                    ? "Ask about a module, endpoint, symbol or workflow…"
+                    : "Connect a repository to ask questions…"
+                }
+                className="max-h-32 min-h-9 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] outline-none placeholder:text-subtle disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                className="focus-ring grid size-8 shrink-0 place-items-center rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] hover:bg-[oklch(0.745_0.19_44)]"
+                disabled={!activeRepositoryId || !input.trim() || sendMessage.isPending}
+                className="focus-ring grid size-8 shrink-0 place-items-center rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] hover:bg-[oklch(0.745_0.19_44)] disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Send"
               >
                 <ArrowUp className="size-3.5" />
@@ -237,8 +296,16 @@ function Assistant() {
         <Panel>
           <PanelHeader title="Context in use" icon={<History className="size-3.5" />} />
           <ul className="space-y-1.5 p-3">
-            {["services/auth/**", "apps/gateway/src/routes/**", "packages/cache/src/redis.ts", "db/schema.prisma"].map((c) => (
-              <li key={c} className="truncate rounded-sm border border-border bg-surface-2/50 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            {[
+              "services/auth/**",
+              "apps/gateway/src/routes/**",
+              "packages/cache/src/redis.ts",
+              "db/schema.prisma",
+            ].map((c) => (
+              <li
+                key={c}
+                className="truncate rounded-sm border border-border bg-surface-2/50 px-2 py-1 font-mono text-[11px] text-muted-foreground"
+              >
                 {c}
               </li>
             ))}

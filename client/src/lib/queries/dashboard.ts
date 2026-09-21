@@ -50,6 +50,18 @@ export interface RecentCommit {
   date: string;
 }
 
+export type AiInsightTone = "danger" | "warning" | "info";
+
+/** Mirrors `AiInsightSchema` (Phase 8.4) — one real, LLM-generated insight
+ * grounded in that run's real debt/coupling/doc-coverage facts, cached on
+ * `AnalysisRun.ai_insights`. `tone` values match `Tone`'s own keys
+ * (`client/src/components/ui-kit.tsx`) directly — no translation needed. */
+export interface AiInsight {
+  tone: AiInsightTone;
+  title: string;
+  body: string;
+}
+
 /** Mirrors `DashboardRead` (`server/app/schemas/dashboard.py`). `analyzed:
  * false` is the full "not analyzed yet" response — every other field is
  * `null`/`[]` rather than a broken empty aggregate. */
@@ -63,14 +75,15 @@ export interface DashboardRead {
   languages: LanguageBreakdown[];
   health_metrics: HealthMetric[];
   recent_commits: RecentCommit[];
-  /** Always `[]` until Phase 8 exists to generate real insights — a hard
-   * rule on the backend, not a placeholder that happens to be empty today. */
-  ai_insights: string[];
+  /** Real, LLM-generated insights as of Phase 8.4 — `[]` is now a genuinely
+   * honest outcome (insight generation failed non-fatally, or the LLM found
+   * nothing worth surfacing for this run), not a placeholder rule anymore. */
+  ai_insights: AiInsight[];
 }
 
 /** `GET /repos/{id}/dashboard` — the latest completed run's counts, computed
- * health metrics, real recent commits, and the always-empty `ai_insights`
- * placeholder. `null` while the active repository hasn't resolved yet. */
+ * health metrics, real recent commits, and — as of Phase 8.4 — real
+ * `ai_insights`. `null` while the active repository hasn't resolved yet. */
 export function useDashboard(repositoryId: string | null) {
   return useQuery({
     queryKey: ["dashboard", repositoryId],
