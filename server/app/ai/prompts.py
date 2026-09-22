@@ -1,11 +1,12 @@
-"""Grounded prompt construction (Phase 8.1) — turns already-retrieved facts
-into the exact `(system, messages, response_schema)` triple
-`GroqProvider.complete` (`app/ai/provider.py`) expects. No DB/model calls
-anywhere in this module — every input is already-resolved data the caller
-(Phase 8.2's `assistant_service.py`, Phase 8.4's `insight_service.py`)
-passes in; this module only formats text.
+"""Grounded prompt construction (Phase 8.1, extended in 8.7) — turns
+already-retrieved facts into the exact `(system, messages, response_schema)`
+triple `GroqProvider.complete` (`app/ai/provider.py`) expects. No DB/model
+calls anywhere in this module — every input is already-resolved data the
+caller (Phase 8.2's `assistant_service.py`, Phase 8.4's `insight_service.py`,
+Phase 8.7's `file_insight_service.py`) passes in; this module only formats
+text.
 
-Both builders share one grounding preamble restating the guide's Section 14
+Every builder shares one grounding preamble restating the guide's Section 14
 principle as a direct instruction: answer only from the given context, cite
 a file/symbol/line for every claim, say plainly when the context isn't
 enough, and keep repository facts separate from AI interpretation. This is
@@ -13,7 +14,7 @@ the textual half of Phase 8's anti-hallucination design — the other half
 (`Reference`s always built from `RetrievedChunk`s, never parsed out of the
 LLM's own text) lives in Phase 8.2, not here.
 
-Both response schemas target Groq's strict-mode structured output, which
+Every response schema targets Groq's strict-mode structured output, which
 (per the OpenAI `json_schema` convention Groq mirrors) requires the root
 schema to be a JSON object, every property listed in `required` (no optional
 fields), and `additionalProperties: false` — never a bare top-level array.
@@ -163,6 +164,60 @@ _INSIGHTS_RESPONSE_SCHEMA = {
     "required": ["insights"],
     "additionalProperties": False,
 }
+
+
+class FileChunkSummary(Protocol):
+    """Duck-typed view of one already-persisted `RagChunk` row belonging to
+    the file being explained (Phase 8.7's `file_insight_service.py`) —
+    gathering/ordering/capping the real rows is that caller's job (design
+    decision #1: FILE_OVERVIEW first, then the rest by `chunk_index`,
+    capped at an unvalidated `_MAX_CONTEXT_CHARS`), this module only
+    formats. `chunk_type` is a plain, already-resolved string (the enum's
+    own `.value`), not an enum member — same convention as
+    `DebtIssueSummary.issue_type`/`.severity`."""
+
+    chunk_type: str
+    chunk_text: str
+    line_start: int
+    line_end: int
+
+
+_FILE_INSIGHT_TASK_INSTRUCTION = (
+    "Explain the purpose of the given repository file, using only the "
+    "excerpts of its own real content provided below (its symbols, API "
+    "routes, or documentation, depending on what was extracted from it). "
+    "Return two fields: `purpose`, a single concise sentence describing "
+    "what the file is for, and `explanation`, a short paragraph (2-4 "
+    "sentences) describing what it actually does, grounded in the "
+    "excerpts given."
+)
+
+_FILE_INSIGHT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "purpose": {"type": "string"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["purpose", "explanation"],
+    "additionalProperties": False,
+}
+
+
+def build_file_insight_prompt(file_path: str, chunks: list[FileChunkSummary]) -> tuple[str, list[dict], dict]:
+    """Builds the per-file purpose/explanation prompt from the file's own
+    already-persisted `RagChunk` rows. This function only formats; it never
+    queries anything (`file_insight_service.py` owns gathering/ordering/
+    capping the chunks, per design decision #1)."""
+    blocks = []
+    for chunk in chunks:
+        header = f"[{chunk.chunk_type}] lines {chunk.line_start}-{chunk.line_end}"
+        blocks.append(f"{header}\n{chunk.chunk_text}")
+    excerpts = "\n\n---\n\n".join(blocks) if blocks else "(no content excerpts available)"
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_FILE_INSIGHT_TASK_INSTRUCTION}"
+    user_content = f"File: {file_path}\n\nExcerpts:\n\n{excerpts}"
+    messages = [{"role": "user", "content": user_content}]
+    return system, messages, _FILE_INSIGHT_RESPONSE_SCHEMA
 
 
 def build_insights_prompt(

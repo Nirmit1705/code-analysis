@@ -42,13 +42,14 @@ export interface ComplexitySummary {
   functions: number;
 }
 
-/** Mirrors `FileInsightRead`. `purpose`/`explanation` are always `null` —
- * Phase 8's job, same rule as `DashboardRead.ai_insights`. No `branches`
- * field: there's no real per-file decision-node count anywhere in Phase
- * 3/4's persisted data (only each function's already-aggregated cyclomatic
- * complexity is kept), so this UI simply doesn't show one rather than
- * inventing a number the way the old mock's `fileInsight.complexity.branches`
- * did. */
+/** Mirrors `FileInsightRead`. `purpose`/`explanation` are real, lazily
+ * generated AI content as of Phase 8.7 (`file_insight_service.py`) — `null`
+ * only when the file has no content to ground on or generation failed,
+ * never a fabricated guess. No `branches` field: there's no real per-file
+ * decision-node count anywhere in Phase 3/4's persisted data (only each
+ * function's already-aggregated cyclomatic complexity is kept), so this UI
+ * simply doesn't show one rather than inventing a number the way the old
+ * mock's `fileInsight.complexity.branches` did. */
 export interface FileInsightRead {
   path: string;
   purpose: string | null;

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,14 @@ class File(Base):
     # decided by `persist_analysis_run` (Phase 4.4), not fixed by this schema.
     complexity_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_analyzed_commit_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Phase 8.7: lazily generated + cached on first `GET .../insight` view,
+    # never eagerly during indexing (docs/PHASE_8_PLAN.md 8.7 design
+    # decision #2). Both null until `file_insight_service.py` fills them in;
+    # a re-analysis always creates fresh `File` rows (never mutates old
+    # ones), so a new run naturally starts with these unset — no explicit
+    # cache-invalidation logic needed.
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

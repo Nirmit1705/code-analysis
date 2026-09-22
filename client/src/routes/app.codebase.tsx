@@ -344,7 +344,7 @@ function CodebaseExplorer({
                 </p>
               ) : (
                 <p className="text-[12px] text-subtle italic">
-                  Not generated yet — Phase 8 will add this.
+                  No AI-generated purpose available for this file.
                 </p>
               )}
             </div>
@@ -424,7 +424,7 @@ function CodebaseExplorer({
               <AiNote title="AI explanation">{fileInsight.data.explanation}</AiNote>
             ) : (
               <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-3 text-center text-[11.5px] text-subtle">
-                AI-generated explanation will appear here once the assistant is wired up.
+                No AI-generated explanation available for this file.
               </p>
             )}
           </div>

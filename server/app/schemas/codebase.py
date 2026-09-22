@@ -1,10 +1,11 @@
 """`GET /repos/{id}/files`, `GET /repos/{id}/files/{file_id}`, and
 `GET /repos/{id}/files/{file_id}/insight` response schemas (Phase 6.7).
 
-`FileInsightRead` is deliberately Phase-4-data-only per `docs/PHASE_6_PLAN.md`:
-`purpose`/`explanation` are always `None` here — Phase 8's job, same rule as
-`DashboardRead.ai_insights`/`ArchitectureRead`'s per-node `insight`. Field
-names are snake_case throughout, matching this codebase's actual established
+`FileInsightRead.purpose`/`.explanation` were Phase-4-data-only placeholders
+(always `None`) through Phase 6/7 — real as of Phase 8.7's
+`file_insight_service.py`, still `None` only when a file has nothing to
+ground on or generation fails, never a fabricated guess. Field names are
+snake_case throughout, matching this codebase's actual established
 convention (confirmed in 6.6's own notes: `dashboard.py`'s docstring claims a
 camelCase frontend translation happens, but every real query module keeps
 snake_case as-is) rather than the plan doc's illustrative `usedBy` spelling.

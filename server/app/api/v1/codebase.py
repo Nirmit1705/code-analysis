@@ -1,7 +1,8 @@
 """Codebase Explorer endpoints (Phase 6.7): a flat file tree, live file
-content read straight from GitHub at the analyzed commit, and a Phase-4-
-data-only per-file insight (complexity/dependencies/usedBy/apis — no
-`purpose`/`explanation`, Phase 8's job).
+content read straight from GitHub at the analyzed commit, and a per-file
+insight combining Phase 4's structural facts (complexity/dependencies/
+usedBy/apis) with a real, lazily-generated `purpose`/`explanation`
+(Phase 8.7 — see `app/services/file_insight_service.py`).
 
 No shared prefix on `router` — matches `dashboard.py`'s/`architecture.py`'s
 own per-file `APIRouter()` convention (composed under `/api/v1` by
@@ -28,7 +29,7 @@ from app.models.repository import Repository
 from app.models.symbol import Symbol
 from app.models.user import User
 from app.schemas.codebase import ComplexitySummary, FileContentRead, FileInsightRead, FileTreeEntry, FileTreeRead
-from app.services import analysis_read_service, github_service, repo_service
+from app.services import analysis_read_service, file_insight_service, github_service, repo_service
 from app.services.github_auth_service import GitHubAuthError, get_installation_token_for_user
 
 router = APIRouter(tags=["codebase"])
@@ -169,9 +170,11 @@ def get_file_insight(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FileInsightRead:
-    """Complexity/dependencies/usedBy/apis straight from Phase 4 rows —
-    `purpose`/`explanation` are always `None` (Phase 8's job), same rule as
-    `DashboardRead.ai_insights`/`ArchitectureRead`'s per-node `insight`."""
+    """Complexity/dependencies/usedBy/apis straight from Phase 4 rows;
+    `purpose`/`explanation` are lazily generated and cached on first view
+    (Phase 8.7's `file_insight_service.get_or_generate_file_insight`) —
+    `None` only for a file with no `RagChunk` rows to ground on, or if
+    generation fails, never a fabricated guess."""
     repository = _repository_or_404(db, repository_id, current_user)
     file = _file_or_404(db, repository.id, file_id)
 
@@ -186,9 +189,11 @@ def get_file_insight(
         }
     )
 
+    purpose, explanation = file_insight_service.get_or_generate_file_insight(db, file=file)
+
     return FileInsightRead(
         path=file.path,
-        purpose=None,
+        purpose=purpose,
         complexity=ComplexitySummary(
             score=file.complexity_score,
             label=_complexity_label(file.complexity_score),
@@ -198,7 +203,7 @@ def get_file_insight(
         dependencies=_build_dependencies(db, file),
         used_by=_build_used_by(db, file),
         apis=apis,
-        explanation=None,
+        explanation=explanation,
     )
 
 
