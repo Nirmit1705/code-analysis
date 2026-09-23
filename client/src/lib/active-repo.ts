@@ -52,13 +52,28 @@ export function clearActiveRepositoryId(): void {
  * the repositories list hasn't loaded (or errored — e.g. not signed in) or
  * the user has no connected repositories at all. Callers should treat `null`
  * as "nothing to show yet", not necessarily an error.
+ *
+ * State always *starts* `null`, even when `localStorage` already has a
+ * value — every `/app/*` route is SSR'd (TanStack Start) and the server has
+ * no `localStorage`, so a lazy initializer that read it synchronously here
+ * would make the client's first render disagree with the server's on every
+ * hard reload/direct nav to a repo-scoped screen for any returning user,
+ * a guaranteed React hydration-mismatch (confirmed live during Phase 8.6
+ * verification). The real stored id is only read inside the effect below,
+ * which runs client-only, after hydration — one extra render, not a
+ * mismatch.
  */
 export function useActiveRepositoryId(): string | null {
-  const [id, setId] = useState<string | null>(() => getActiveRepositoryId());
+  const [id, setId] = useState<string | null>(null);
   const repositories = useRepositories();
 
   useEffect(() => {
     if (id !== null) return;
+    const stored = getActiveRepositoryId();
+    if (stored) {
+      setId(stored);
+      return;
+    }
     const fallback = repositories.data?.[0]?.id;
     if (fallback) {
       setActiveRepositoryId(fallback);
