@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, ChevronDown, FileCode2, Search, Sparkles, Folder } from "lucide-react";
+import { z } from "zod";
 
 import { AiNote, Panel, PanelHeader, ScoreBar, Tag, severityTone } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
@@ -16,7 +17,24 @@ import {
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
+// `file` deep-links a specific file by its real `File.path` (not `File.id` —
+// a re-analysis always creates fresh `File` rows with new ids, per
+// `file_insight_service.py`'s own precedent, so a path survives a
+// re-analysis and an id wouldn't). `line_start`/`line_end` highlight and
+// scroll to that exact range — the AI Assistant's citation chips are the
+// first real producer of this link shape (`Reference.file_path`/
+// `line_start`/`line_end` already carried this data; it just had nowhere to
+// go before). `z.coerce` mirrors `onboarding.tsx`'s own defensive stance —
+// TanStack Router's default search parser already JSON-parses numeric-looking
+// values, but coercing explicitly here is cheap insurance against either shape.
+const searchSchema = z.object({
+  file: z.coerce.string().optional(),
+  line_start: z.coerce.number().optional(),
+  line_end: z.coerce.number().optional(),
+});
+
 export const Route = createFileRoute("/app/codebase")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Codebase Explorer — Substrate" },
@@ -146,6 +164,7 @@ function Codebase() {
   const activeRepositoryId = useActiveRepositoryId();
   const repositories = useRepositories();
   const fileTree = useFileTree(activeRepositoryId);
+  const search = Route.useSearch();
 
   if (repositories.isLoading) {
     return <CenterMessage>Loading…</CenterMessage>;
@@ -177,18 +196,40 @@ function Codebase() {
     );
   }
 
-  return <CodebaseExplorer repositoryId={activeRepositoryId} files={fileTree.data.files} />;
+  return (
+    <CodebaseExplorer
+      repositoryId={activeRepositoryId}
+      files={fileTree.data.files}
+      searchFile={search.file ?? null}
+      highlightStart={search.line_start ?? null}
+      highlightEnd={search.line_end ?? null}
+    />
+  );
 }
 
 function CodebaseExplorer({
   repositoryId,
   files,
+  searchFile,
+  highlightStart,
+  highlightEnd,
 }: {
   repositoryId: string;
   files: FileTreeEntry[];
+  searchFile: string | null;
+  highlightStart: number | null;
+  highlightEnd: number | null;
 }) {
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [filter, setFilter] = useState("");
+
+  // The URL is the source of truth for which file is open — not local state
+  // — so a citation-chip deep link (or any other producer of this URL shape
+  // in the future) just works without a second code path.
+  const selectedFileId = useMemo(
+    () => (searchFile ? (files.find((f) => f.path === searchFile)?.id ?? null) : null),
+    [files, searchFile],
+  );
 
   const fileContent = useFileContent(repositoryId, selectedFileId);
   const fileInsight = useFileInsight(repositoryId, selectedFileId);
@@ -196,6 +237,24 @@ function CodebaseExplorer({
   const selectedEntry = selectedFileId
     ? (files.find((f) => f.id === selectedFileId) ?? null)
     : null;
+
+  const effectiveHighlightEnd = highlightEnd ?? highlightStart;
+
+  const selectFile = (fileId: string) => {
+    const entry = files.find((f) => f.id === fileId);
+    if (!entry) return;
+    void navigate({ to: "/app/codebase", search: { file: entry.path }, replace: true });
+  };
+
+  // Scroll the referenced line into view once its file's content has
+  // actually loaded — not on every render, only when the loaded content or
+  // the target line itself changes.
+  useEffect(() => {
+    if (highlightStart == null) return;
+    if (!fileContent.data || fileContent.data.binary || fileContent.data.truncated) return;
+    const el = document.getElementById(`line-${highlightStart}`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [fileContent.data, highlightStart]);
 
   const filteredFiles = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -233,7 +292,7 @@ function CodebaseExplorer({
                 node={n}
                 depth={0}
                 selectedFileId={selectedFileId}
-                onSelect={setSelectedFileId}
+                onSelect={selectFile}
               />
             ))
           ) : (
@@ -295,20 +354,31 @@ function CodebaseExplorer({
           ) : (
             <pre className="min-w-full">
               <code className="block py-2 font-mono text-[12px] leading-[1.55]">
-                {(fileContent.data.content ?? "").split("\n").map((l, i) => (
-                  <span
-                    key={i}
-                    className={cn(
-                      "flex px-1 hover:bg-surface/70",
-                      l.includes("NOTE:") && "bg-warning/[0.07]",
-                    )}
-                  >
-                    <span className="w-10 shrink-0 pr-3 text-right text-subtle select-none">
-                      {i + 1}
+                {(fileContent.data.content ?? "").split("\n").map((l, i) => {
+                  const lineNumber = i + 1;
+                  const isReferenced =
+                    highlightStart != null &&
+                    lineNumber >= highlightStart &&
+                    lineNumber <= (effectiveHighlightEnd ?? highlightStart);
+                  return (
+                    <span
+                      key={i}
+                      id={`line-${lineNumber}`}
+                      className={cn(
+                        "flex px-1 hover:bg-surface/70",
+                        l.includes("NOTE:") && "bg-warning/[0.07]",
+                        isReferenced && "bg-violet/[0.16] hover:bg-violet/[0.2]",
+                      )}
+                    >
+                      <span className="w-10 shrink-0 pr-3 text-right text-subtle select-none">
+                        {lineNumber}
+                      </span>
+                      <span className="whitespace-pre text-secondary-foreground">
+                        {highlight(l)}
+                      </span>
                     </span>
-                    <span className="whitespace-pre text-secondary-foreground">{highlight(l)}</span>
-                  </span>
-                ))}
+                  );
+                })}
               </code>
             </pre>
           )}

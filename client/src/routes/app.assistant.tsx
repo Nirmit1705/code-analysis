@@ -268,6 +268,11 @@ function Assistant() {
                           <Link
                             key={`${ref.file_path}-${ref.line_start}-${refIndex}`}
                             to="/app/codebase"
+                            search={{
+                              file: ref.file_path,
+                              line_start: ref.line_start,
+                              line_end: ref.line_end,
+                            }}
                             className="focus-ring flex items-center gap-1.5 rounded-sm border border-border bg-surface px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-violet/40 hover:text-foreground"
                           >
                             <FileCode2 className="size-3 text-violet-soft" /> {referenceLabel(ref)}
