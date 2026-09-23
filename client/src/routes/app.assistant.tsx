@@ -83,6 +83,20 @@ function renderInlineMarkdown(line: string): ReactNode[] {
   });
 }
 
+/** The model's own answer text sometimes contains a literal two-character
+ * `\n` (backslash + "n") where it means an actual line break — observed
+ * live, not hypothetical: Groq's strict-mode JSON output is a real newline
+ * once `json.loads` decodes it server-side, but the model occasionally
+ * writes a literal escape sequence as part of the *content* of that string
+ * (a known quirk of models asked to produce structured multi-paragraph text
+ * inside one JSON field), which survives JSON parsing on both ends as the
+ * literal two characters, not a real newline — `text.split("\n")` below
+ * can't split on those, so they rendered as bare `\n`/`\t` characters in the
+ * UI. Normalized here, once, before any line-based parsing. */
+function normalizeEscapedWhitespace(text: string): string {
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+}
+
 /** `- `/`* `-prefixed lines (a required space after the marker, so this
  * never fires on an opening `*italic*` span, which has no space after its
  * `*`) are grouped into a real `<ul>` instead of rendering as bare
@@ -91,7 +105,9 @@ function renderInlineMarkdown(line: string): ReactNode[] {
  * the model's own `\n\n` paragraph breaks) are dropped; the gap comes from
  * spacing between blocks instead of rendering an empty line. */
 function renderAnswerBody(text: string): ReactNode[] {
-  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  const lines = normalizeEscapedWhitespace(text)
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
   const blocks: ReactNode[] = [];
   let currentList: string[] = [];
 
