@@ -1,4 +1,4 @@
-# AI Codebase Intelligence Platform — Backend
+# AI Codebase Intelligence Platform (Backend)
 
 FastAPI + SQLAlchemy/Alembic + PostgreSQL/pgvector + Redis/Celery. This README covers **local development setup only** — getting a clean checkout of `server/` into a fully working local environment. For what's actually built and what's next, see `CLAUDE.md` and `../docs/BACKEND_IMPLEMENTATION_PLAN.md`.
 
