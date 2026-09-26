@@ -3,7 +3,9 @@ home for lookups every read-only `/repos/{id}/...` screen endpoint needs but
 none of them owns exclusively. `get_latest_completed_run`/
 `get_previous_completed_run` back the Dashboard (6.3/6.4); `load_dependency_edges`
 (added in 6.5) backs Architecture and, per `docs/PHASE_6_PLAN.md`, is shared
-again by 6.9's Dependencies screen once it lands.
+again by 6.9's Dependencies screen once it lands. `load_run_facts` (added in
+Phase 9.1) backs Compare/Impact, reusing `load_dependency_edges` for its own
+edge list rather than a second reconstruction.
 
 Distinct from `repo_service.py`: that module owns *writes* (connect/select/
 persist) plus the one existing read it already had before this phase
@@ -19,10 +21,13 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analysis.change import ApiFact, FileFact, RunFacts, SymbolFact
 from app.analysis.dependencies import DependencyEdge as PureDependencyEdge
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
+from app.models.api_endpoint import ApiEndpoint
 from app.models.dependency import DependencyEdge as DependencyEdgeRow
 from app.models.file import File
+from app.models.symbol import Symbol
 
 logger = logging.getLogger(__name__)
 
@@ -128,3 +133,57 @@ def load_dependency_edges(db: Session, analysis_run_id: uuid.UUID) -> list[PureD
             )
         )
     return edges
+
+
+def load_run_facts(db: Session, analysis_run_id: uuid.UUID) -> RunFacts:
+    """Reconstructs Phase 9.1's pure `RunFacts` (`app.analysis.change`) from
+    one run's persisted `File`/`Symbol`/`ApiEndpoint` rows plus the existing
+    `load_dependency_edges` above — same "reconstruct pure dataclasses from
+    already-persisted rows, so the real diffing logic can run fresh at read
+    time" precedent that function itself already established, not a new
+    pattern. `analysis/change.py::diff_analysis_runs` is the only real
+    consumer.
+
+    `Symbol`/`ApiEndpoint` rows resolve their `file_path` via this same run's
+    own `File.id -> File.path` map; a row whose `file_id` doesn't resolve
+    against it (not a real code path today — every `Symbol`/`ApiEndpoint`
+    row is inserted in the same `persist_analysis_run` transaction as its
+    owning `File` row — but defended the same way `load_dependency_edges`
+    already defends its own equivalent case) is skipped with a warning
+    rather than raising.
+    """
+    file_rows = db.execute(
+        select(File.id, File.path, File.language, File.loc).where(File.analysis_run_id == analysis_run_id)
+    ).all()
+    path_by_file_id = {row.id: row.path for row in file_rows}
+    files = [FileFact(path=row.path, language=row.language, loc=row.loc) for row in file_rows]
+
+    symbols: list[SymbolFact] = []
+    symbol_rows = db.execute(
+        select(Symbol.id, Symbol.file_id, Symbol.name, Symbol.kind).where(
+            Symbol.analysis_run_id == analysis_run_id
+        )
+    ).all()
+    for row in symbol_rows:
+        file_path = path_by_file_id.get(row.file_id)
+        if file_path is None:
+            logger.warning("load_run_facts: skipping symbol %s with unresolved file_id", row.id)
+            continue
+        symbols.append(SymbolFact(file_path=file_path, name=row.name, kind=row.kind))
+
+    apis: list[ApiFact] = []
+    api_rows = db.execute(
+        select(ApiEndpoint.id, ApiEndpoint.file_id, ApiEndpoint.method, ApiEndpoint.path).where(
+            ApiEndpoint.analysis_run_id == analysis_run_id
+        )
+    ).all()
+    for row in api_rows:
+        file_path = path_by_file_id.get(row.file_id)
+        if file_path is None:
+            logger.warning("load_run_facts: skipping API endpoint %s with unresolved file_id", row.id)
+            continue
+        apis.append(ApiFact(method=row.method, path=row.path, file_path=file_path))
+
+    edges = load_dependency_edges(db, analysis_run_id)
+
+    return RunFacts(files=files, symbols=symbols, apis=apis, edges=edges)
