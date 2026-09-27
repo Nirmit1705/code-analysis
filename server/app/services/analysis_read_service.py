@@ -49,20 +49,32 @@ def get_latest_completed_run(db: Session, repository_id: uuid.UUID) -> AnalysisR
     ).scalar_one_or_none()
 
 
-def get_previous_completed_run(db: Session, repository_id: uuid.UUID, before: datetime) -> AnalysisRun | None:
+def get_previous_completed_run(
+    db: Session, repository_id: uuid.UUID, before: datetime, branch: str | None = None
+) -> AnalysisRun | None:
     """The completed run immediately preceding `before` (in practice, the
     latest run's own `completed_at`) — used to compute a health metric's
     `delta` (Phase 6.3). `None` if there is no earlier completed run (a
     repository's first analysis has nothing to compare against, so
     `delta` is defined as `0` in that case rather than compared against a
-    fabricated baseline)."""
+    fabricated baseline).
+
+    `branch` (added Phase 9.3, design decision #14) additionally scopes the
+    search to runs on that branch only — Impact's own use (find the target
+    run's immediate predecessor *on the same branch*, per
+    `docs/PHASE_9_PLAN.md`'s design decision #2) needs this; every existing
+    caller (Dashboard's 6.3 health-delta) omits it and keeps its original,
+    unscoped-by-branch behavior unchanged."""
+    filters = [
+        AnalysisRun.repository_id == repository_id,
+        AnalysisRun.status == AnalysisRunStatus.COMPLETED,
+        AnalysisRun.completed_at < before,
+    ]
+    if branch is not None:
+        filters.append(AnalysisRun.branch == branch)
     return db.execute(
         select(AnalysisRun)
-        .where(
-            AnalysisRun.repository_id == repository_id,
-            AnalysisRun.status == AnalysisRunStatus.COMPLETED,
-            AnalysisRun.completed_at < before,
-        )
+        .where(*filters)
         .order_by(AnalysisRun.completed_at.desc(), AnalysisRun.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
