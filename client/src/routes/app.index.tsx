@@ -14,13 +14,13 @@ import { useRepositories } from "@/lib/queries/repos";
 export const Route = createFileRoute("/app/")({
   head: () => ({
     meta: [
-      { title: "Project Overview — Substrate" },
+      { title: "Project Overview — CodeLens AI" },
       {
         name: "description",
         content:
           "Project health, architecture snapshot, recent changes and AI insights for the analyzed repository.",
       },
-      { property: "og:title", content: "Project Overview — Substrate" },
+      { property: "og:title", content: "Project Overview — CodeLens AI" },
       {
         property: "og:description",
         content:

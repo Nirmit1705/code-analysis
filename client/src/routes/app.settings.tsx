@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/settings")({
   head: () => ({
     meta: [
-      { title: "Profile & Settings — Substrate" },
+      { title: "Profile & Settings — CodeLens AI" },
       { name: "description", content: "Manage your profile, team members, notification rules, API tokens and workspace plan usage." },
-      { property: "og:title", content: "Profile & Settings — Substrate" },
-      { property: "og:description", content: "Workspace, team and billing configuration for Substrate." },
+      { property: "og:title", content: "Profile & Settings — CodeLens AI" },
+      { property: "og:description", content: "Workspace, team and billing configuration for CodeLens AI." },
     ],
   }),
   component: SettingsPage,

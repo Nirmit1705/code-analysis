@@ -61,13 +61,13 @@ export const Route = createFileRoute("/onboarding")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "Connect a repository — Substrate" },
+      { title: "Connect a repository — CodeLens AI" },
       {
         name: "description",
         content:
-          "Connect GitHub, pick a repository and branch, and let Substrate build codebase intelligence for it.",
+          "Connect GitHub, pick a repository and branch, and let CodeLens AI build codebase intelligence for it.",
       },
-      { property: "og:title", content: "Connect a repository — Substrate" },
+      { property: "og:title", content: "Connect a repository — CodeLens AI" },
       {
         property: "og:description",
         content:
@@ -295,7 +295,7 @@ function Onboarding() {
               Let&apos;s understand your first codebase.
             </h1>
             <p className="mx-auto mt-3 max-w-lg text-[13.5px] leading-relaxed text-muted-foreground">
-              Substrate reads a repository once, builds an architecture graph, an API surface and a
+              CodeLens AI reads a repository once, builds an architecture graph, an API surface and a
               debt model, then keeps them current as your team commits.
             </p>
             <div className="mt-7 grid gap-2 text-left sm:grid-cols-3">
@@ -324,7 +324,7 @@ function Onboarding() {
           <div className="panel ambient-panel p-7">
             <h1 className="text-[20px] font-semibold tracking-tight">Connect GitHub</h1>
             <p className="mt-2 text-[13px] text-muted-foreground">
-              Substrate requests the minimum scopes needed to read and analyze source.
+              CodeLens AI requests the minimum scopes needed to read and analyze source.
             </p>
             <ul className="mt-5 divide-y divide-border rounded-md border border-border">
               {[

@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/repository")({
   head: () => ({
     meta: [
-      { title: "Repository Settings — Substrate" },
+      { title: "Repository Settings — CodeLens AI" },
       { name: "description", content: "Configure tracked branches, analysis schedule, ignore patterns and access for a connected repository." },
-      { property: "og:title", content: "Repository Settings — Substrate" },
-      { property: "og:description", content: "Control how Substrate analyses this repository." },
+      { property: "og:title", content: "Repository Settings — CodeLens AI" },
+      { property: "og:description", content: "Control how CodeLens AI analyses this repository." },
     ],
   }),
   component: RepositorySettings,

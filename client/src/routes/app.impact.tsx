@@ -22,13 +22,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/impact")({
   head: () => ({
     meta: [
-      { title: "Impact Analysis — Substrate" },
+      { title: "Impact Analysis — CodeLens AI" },
       {
         name: "description",
         content:
           "Pick an analyzed commit and see everything it affects downstream, before you ship it.",
       },
-      { property: "og:title", content: "Impact Analysis — Substrate" },
+      { property: "og:title", content: "Impact Analysis — CodeLens AI" },
       {
         property: "og:description",
         content: "Direct and indirect blast radius, API impact and risk scoring, computed from the real dependency graph.",

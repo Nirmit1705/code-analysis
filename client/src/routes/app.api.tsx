@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/api")({
   head: () => ({
     meta: [
-      { title: "API Reference — Substrate" },
+      { title: "API Reference — CodeLens AI" },
       { name: "description", content: "Every endpoint discovered in the codebase with request shape, response shape, auth requirements and call sites." },
-      { property: "og:title", content: "API Reference — Substrate" },
+      { property: "og:title", content: "API Reference — CodeLens AI" },
       { property: "og:description", content: "A reference generated from route handlers and types, not from hand-written specs." },
     ],
   }),

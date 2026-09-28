@@ -1,5 +1,5 @@
 export const PRODUCT = {
-  name: "Substrate",
+  name: "CodeLens AI",
   tagline: "Codebase Intelligence",
 };
 
@@ -167,7 +167,7 @@ export class AuthService {
     );
     const refreshToken = crypto.randomUUID();
 
-    // NOTE: session TTL exceeds refresh lifetime — flagged by Substrate
+    // NOTE: session TTL exceeds refresh lifetime — flagged by CodeLens AI
     await this.redis.set(\`session:\${refreshToken}\`, userId, 'EX', REFRESH_TTL_SECONDS);
     return { accessToken, refreshToken };
   }
@@ -282,7 +282,7 @@ export const debtIssues = [
     category: "Documentation Gaps",
     files: ["packages/ui/src/index.ts", "services/interview/src/scoring/rubric.ts", "+18 more"],
     why: "New engineers rely on reading implementations to understand public contracts, which is the largest reported onboarding cost in this repository.",
-    fix: "Generate TSDoc from Substrate's inferred contracts and commit the reviewed output alongside each package barrel file.",
+    fix: "Generate TSDoc from CodeLens AI's inferred contracts and commit the reviewed output alongside each package barrel file.",
   },
 ];
 

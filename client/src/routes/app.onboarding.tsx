@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/onboarding")({
   head: () => ({
     meta: [
-      { title: "Developer Onboarding — Substrate" },
+      { title: "Developer Onboarding — CodeLens AI" },
       { name: "description", content: "A generated learning path that walks a new engineer through this codebase in the order the system actually works." },
-      { property: "og:title", content: "Developer Onboarding — Substrate" },
+      { property: "og:title", content: "Developer Onboarding — CodeLens AI" },
       { property: "og:description", content: "Turn a repository into a guided curriculum for new team members." },
     ],
   }),

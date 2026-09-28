@@ -37,13 +37,13 @@ export const Route = createFileRoute("/app/codebase")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "Codebase Explorer — Substrate" },
+      { title: "Codebase Explorer — CodeLens AI" },
       {
         name: "description",
         content:
           "IDE-style codebase explorer with file tree, syntax-aware code viewer and an AI insights panel per file.",
       },
-      { property: "og:title", content: "Codebase Explorer — Substrate" },
+      { property: "og:title", content: "Codebase Explorer — CodeLens AI" },
       {
         property: "og:description",
         content:

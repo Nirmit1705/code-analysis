@@ -16,13 +16,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/assistant")({
   head: () => ({
     meta: [
-      { title: "AI Codebase Assistant — Substrate" },
+      { title: "AI Codebase Assistant — CodeLens AI" },
       {
         name: "description",
         content:
           "Ask questions about your repository and get answers grounded in real files, with every citation linked to source.",
       },
-      { property: "og:title", content: "AI Codebase Assistant — Substrate" },
+      { property: "og:title", content: "AI Codebase Assistant — CodeLens AI" },
       {
         property: "og:description",
         content: "Repository-aware answers with file citations, not a generic chatbot.",
@@ -250,7 +250,7 @@ function Assistant() {
                         m.error ? "bg-danger" : "bg-violet pulse-node",
                       )}
                     />
-                    Substrate
+                    CodeLens AI
                     {m.scope ? (
                       <span className="ml-1 font-mono text-[10.5px] normal-case text-subtle">
                         {m.scope}
@@ -302,7 +302,7 @@ function Assistant() {
             {sendMessage.isPending ? (
               <div className="rounded-lg border border-violet/20 bg-violet/[0.055] p-4">
                 <p className="flex items-center gap-1.5 text-[11px] tracking-wide text-violet-soft uppercase">
-                  <span className="size-1.5 rounded-full bg-violet pulse-node" /> Substrate
+                  <span className="size-1.5 rounded-full bg-violet pulse-node" /> CodeLens AI
                 </p>
                 <p className="mt-2 text-[13px] text-subtle">Thinking…</p>
               </div>

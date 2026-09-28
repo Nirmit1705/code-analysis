@@ -13,13 +13,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/architecture")({
   head: () => ({
     meta: [
-      { title: "Architecture Explorer — Substrate" },
+      { title: "Architecture Explorer — CodeLens AI" },
       {
         name: "description",
         content:
           "Interactive architecture graph inferred from source: components, boundaries and data flows.",
       },
-      { property: "og:title", content: "Architecture Explorer — Substrate" },
+      { property: "og:title", content: "Architecture Explorer — CodeLens AI" },
       {
         property: "og:description",
         content: "Zoom, filter and inspect every component of your system.",

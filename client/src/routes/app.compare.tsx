@@ -28,13 +28,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/compare")({
   head: () => ({
     meta: [
-      { title: "Compare — Substrate" },
+      { title: "Compare — CodeLens AI" },
       {
         name: "description",
         content:
           "Compare two analyzed commits architecturally: added and removed files, API surface changes, and dependency-edge risk.",
       },
-      { property: "og:title", content: "Compare — Substrate" },
+      { property: "og:title", content: "Compare — CodeLens AI" },
       { property: "og:description", content: "An architectural diff, not a line diff." },
     ],
   }),

@@ -14,13 +14,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/dependencies")({
   head: () => ({
     meta: [
-      { title: "Dependency Analysis — Substrate" },
+      { title: "Dependency Analysis — CodeLens AI" },
       {
         name: "description",
         content:
           "Dependency graph, circular dependencies, coupling hotspots, orphaned modules and outdated external packages.",
       },
-      { property: "og:title", content: "Dependency Analysis — Substrate" },
+      { property: "og:title", content: "Dependency Analysis — CodeLens AI" },
       {
         property: "og:description",
         content: "Understand internal coupling and external package risk in one view.",

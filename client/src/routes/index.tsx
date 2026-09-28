@@ -24,13 +24,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Substrate — Understand Any Codebase. Instantly." },
+      { title: "CodeLens AI — Understand Any Codebase. Instantly." },
       {
         name: "description",
         content:
           "AI-powered codebase intelligence: architecture graphs, dependency analysis, feature tracing, impact analysis and generated documentation for any GitHub repository.",
       },
-      { property: "og:title", content: "Substrate — Understand Any Codebase. Instantly." },
+      { property: "og:title", content: "CodeLens AI — Understand Any Codebase. Instantly." },
       {
         property: "og:description",
         content:
@@ -166,7 +166,7 @@ function ProductPreview() {
 
                 <div className="mx-auto flex min-w-0 items-center gap-2 rounded-md border border-white/12 bg-black/25 px-2.5 py-1">
                   <Github className="size-3.5 text-muted-foreground" />
-                  <span className="truncate font-mono text-[11px] text-muted-foreground">github.com/substrate-labs/{repo.name}</span>
+                  <span className="truncate font-mono text-[11px] text-muted-foreground">github.com/codelens-ai/{repo.name}</span>
                 </div>
               </div>
 
@@ -353,7 +353,7 @@ function Landing() {
                 The system diagram that can&apos;t go stale.
               </h3>
               <p className="mt-3 text-[13.5px] leading-relaxed text-muted-foreground">
-                Substrate infers services, boundaries and data flows directly from source. Zoom,
+                CodeLens AI infers services, boundaries and data flows directly from source. Zoom,
                 filter and open any component to see its files, dependents, endpoints and health.
               </p>
               <ul className="mt-4 space-y-2 text-[13px] text-muted-foreground">

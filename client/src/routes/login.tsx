@@ -10,16 +10,16 @@ import { ApiError } from "@/lib/api";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Sign in — Substrate" },
+      { title: "Sign in — CodeLens AI" },
       {
         name: "description",
         content:
-          "Sign in to Substrate with GitHub or email to explore your codebase intelligence workspace.",
+          "Sign in to CodeLens AI with GitHub or email to explore your codebase intelligence workspace.",
       },
-      { property: "og:title", content: "Sign in — Substrate" },
+      { property: "og:title", content: "Sign in — CodeLens AI" },
       {
         property: "og:description",
-        content: "Sign in to your Substrate codebase intelligence workspace.",
+        content: "Sign in to your CodeLens AI codebase intelligence workspace.",
       },
     ],
   }),
@@ -131,7 +131,7 @@ function Login() {
 
   return (
     <AuthFrame
-      title="Sign in to Substrate"
+      title="Sign in to CodeLens AI"
       subtitle="Codebase intelligence for your repositories"
       footer={
         <>

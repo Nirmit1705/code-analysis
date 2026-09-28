@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/documentation")({
   head: () => ({
     meta: [
-      { title: "Documentation — Substrate" },
+      { title: "Documentation — CodeLens AI" },
       { name: "description", content: "An engineering wiki generated from the codebase: overview, architecture, modules, data models and setup." },
-      { property: "og:title", content: "Documentation — Substrate" },
+      { property: "og:title", content: "Documentation — CodeLens AI" },
       { property: "og:description", content: "Always-current documentation derived from the code, not from stale hand-written pages." },
     ],
   }),

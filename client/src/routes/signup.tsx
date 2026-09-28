@@ -10,13 +10,13 @@ import { ApiError } from "@/lib/api";
 export const Route = createFileRoute("/signup")({
   head: () => ({
     meta: [
-      { title: "Create account — Substrate" },
+      { title: "Create account — CodeLens AI" },
       {
         name: "description",
         content:
-          "Create a Substrate account with GitHub and analyze your first repository in minutes.",
+          "Create a CodeLens AI account with GitHub and analyze your first repository in minutes.",
       },
-      { property: "og:title", content: "Create account — Substrate" },
+      { property: "og:title", content: "Create account — CodeLens AI" },
       {
         property: "og:description",
         content:

@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/debt")({
   head: () => ({
     meta: [
-      { title: "Technical Debt — Substrate" },
+      { title: "Technical Debt — CodeLens AI" },
       { name: "description", content: "A scored technical debt inventory with why it matters, the files involved and a concrete recommended fix." },
-      { property: "og:title", content: "Technical Debt — Substrate" },
+      { property: "og:title", content: "Technical Debt — CodeLens AI" },
       { property: "og:description", content: "Prioritised debt with severity, affected files and AI-suggested remediation." },
     ],
   }),

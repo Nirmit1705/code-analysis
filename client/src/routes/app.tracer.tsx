@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/tracer")({
   head: () => ({
     meta: [
-      { title: "Feature Tracer — Substrate" },
+      { title: "Feature Tracer — CodeLens AI" },
       { name: "description", content: "Trace any feature end to end, from UI event through gateway, services and repositories to the database." },
-      { property: "og:title", content: "Feature Tracer — Substrate" },
+      { property: "og:title", content: "Feature Tracer — CodeLens AI" },
       { property: "og:description", content: "Follow a feature across every service it touches, with per-node files, functions and AI explanations." },
     ],
   }),
@@ -132,7 +132,7 @@ function Tracer() {
               </div>
             </div>
             <AiNote title="AI explanation">
-              This hop is {step === flow.length - 1 ? "the terminal write of the trace" : "an intermediate boundary"}. Substrate
+              This hop is {step === flow.length - 1 ? "the terminal write of the trace" : "an intermediate boundary"}. CodeLens AI
               resolved it by following the import graph and route registrations — no annotations or manual mapping required.
             </AiNote>
           </div>

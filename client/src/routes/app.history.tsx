@@ -7,9 +7,9 @@ import { analysisHistory, debtTrend } from "@/lib/repo-data";
 export const Route = createFileRoute("/app/history")({
   head: () => ({
     meta: [
-      { title: "Analysis History — Substrate" },
+      { title: "Analysis History — CodeLens AI" },
       { name: "description", content: "Every analysis run for this repository with architecture and debt scores over time." },
-      { property: "og:title", content: "Analysis History — Substrate" },
+      { property: "og:title", content: "Analysis History — CodeLens AI" },
       { property: "og:description", content: "Track how architecture health and technical debt move commit by commit." },
     ],
   }),
