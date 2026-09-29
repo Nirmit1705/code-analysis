@@ -86,7 +86,7 @@ from app.analysis.ingestion import IngestedFile, IngestionResult  # noqa: E402
 from app.analysis.metrics import FileMetrics  # noqa: E402
 from app.analysis.pipeline import AnalysisResult, analyze_ingested  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.api_endpoint import ApiEndpoint  # noqa: E402
 from app.models.debt_issue import DebtIssue  # noqa: E402
 from app.models.dependency import DependencyEdge as DependencyEdgeRow  # noqa: E402
@@ -235,7 +235,8 @@ def run_dependency_cycle_persistence(db: Session, repository: Repository) -> boo
 
         _clear_previous_runs(db, repository)
         queued_run = create_queued_analysis_run(
-            db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+            db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
         run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
             db, analysis_run=queued_run, analysis_result=result
@@ -374,7 +375,8 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
 
     _clear_previous_runs(db, repository)
     dirty_queued = create_queued_analysis_run(
-        db, repository_id=repository.id, branch="main", commit_sha=dirty_commit_sha
+        db, repository_id=repository.id, branch="main", commit_sha=dirty_commit_sha,
+        trigger_source=AnalysisRunTriggerSource.MANUAL,
     )
     dirty_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=dirty_queued, analysis_result=dirty_result
@@ -432,7 +434,8 @@ def run_debt_fixture_persistence(db: Session, repository: Repository) -> bool:
     clean_result = _synthetic_analysis_result(clean_fixture, commit_sha=clean_commit_sha)
     _clear_previous_runs(db, repository)
     clean_queued = create_queued_analysis_run(
-        db, repository_id=repository.id, branch="main", commit_sha=clean_commit_sha
+        db, repository_id=repository.id, branch="main", commit_sha=clean_commit_sha,
+        trigger_source=AnalysisRunTriggerSource.MANUAL,
     )
     clean_run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=clean_queued, analysis_result=clean_result
@@ -463,6 +466,7 @@ def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
         "(now create_queued_analysis_run's contract, not persist_analysis_run's)",
         _raises_value_error(lambda: create_queued_analysis_run(
             db, repository_id=uuid_module.uuid4(), branch="main", commit_sha="x" * 40,
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )),
     )
 
@@ -497,7 +501,8 @@ def run_transaction_atomicity(db: Session, repository: Repository) -> bool:
     # expected, not a leak, even though the persist_analysis_run call below
     # will fail.
     queued_run = create_queued_analysis_run(
-        db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+        db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+        trigger_source=AnalysisRunTriggerSource.MANUAL,
     )
 
     raised = _raises_value_error(
@@ -599,7 +604,8 @@ def run_real_repo_dogfood(db: Session, repository: Repository) -> bool:
 
     _clear_previous_runs(db, repository)
     queued_run = create_queued_analysis_run(
-        db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+        db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+        trigger_source=AnalysisRunTriggerSource.MANUAL,
     )
     run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=queued_run, analysis_result=result
@@ -687,7 +693,8 @@ def run_live_bonus(db: Session, user: User) -> bool:
         )
         _clear_previous_runs(db, repository)
         queued_run = create_queued_analysis_run(
-            db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+            db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
         run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
             db, analysis_run=queued_run, analysis_result=result

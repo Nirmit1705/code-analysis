@@ -75,7 +75,7 @@ from app.analysis import pipeline  # noqa: E402
 from app.analysis.chunking import RagChunkType  # noqa: E402
 from app.analysis.ingestion import IngestedFile, IngestionResult  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.rag_chunk import EMBEDDING_DIM, RagChunk  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
@@ -175,7 +175,7 @@ def run_fk_resolution_and_fidelity(db: Session, repository: Repository) -> bool:
     result = pipeline.analyze_ingested(ingestion_result, commit_sha=commit_sha)
 
     _clear_previous_runs(db, repository)
-    queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+    queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run, file_id_by_path, symbol_id_by_symbol = persist_analysis_run(db, analysis_run=queued, analysis_result=result)
     run = finalize_analysis_run_completed(db, analysis_run=run, repository=repository)
 
@@ -259,7 +259,7 @@ def run_pruning_correctness(db: Session, repository: Repository) -> bool:
     commit_sha_1 = "ragindex20000000000000000000000000000001"[:40]
     result_1 = pipeline.analyze_ingested(ingestion_result, commit_sha=commit_sha_1)
     _clear_previous_runs(db, repository)
-    queued_1 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_1)
+    queued_1 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_1, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run_1, file_id_by_path_1, symbol_id_by_symbol_1 = persist_analysis_run(
         db, analysis_run=queued_1, analysis_result=result_1
     )
@@ -278,7 +278,7 @@ def run_pruning_correctness(db: Session, repository: Repository) -> bool:
 
         commit_sha_2 = "ragindex20000000000000000000000000000002"[:40]
         result_2 = pipeline.analyze_ingested(ingestion_result, commit_sha=commit_sha_2)
-        queued_2 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_2)
+        queued_2 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_2, trigger_source=AnalysisRunTriggerSource.MANUAL)
         run_2, file_id_by_path_2, symbol_id_by_symbol_2 = persist_analysis_run(
             db, analysis_run=queued_2, analysis_result=result_2
         )
@@ -324,7 +324,7 @@ def run_never_zero_on_forced_failure(db: Session, repository: Repository) -> boo
     commit_sha_1 = "ragindex30000000000000000000000000000001"[:40]
     result_1 = pipeline.analyze_ingested(ingestion_result, commit_sha=commit_sha_1)
     _clear_previous_runs(db, repository)
-    queued_1 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_1)
+    queued_1 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_1, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run_1, file_id_by_path_1, symbol_id_by_symbol_1 = persist_analysis_run(
         db, analysis_run=queued_1, analysis_result=result_1
     )
@@ -344,7 +344,7 @@ def run_never_zero_on_forced_failure(db: Session, repository: Repository) -> boo
 
     commit_sha_2 = "ragindex30000000000000000000000000000002"[:40]
     result_2 = pipeline.analyze_ingested(ingestion_result, commit_sha=commit_sha_2)
-    queued_2 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_2)
+    queued_2 = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha_2, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run_2, file_id_by_path_2, symbol_id_by_symbol_2 = persist_analysis_run(
         db, analysis_run=queued_2, analysis_result=result_2
     )
@@ -406,6 +406,7 @@ def run_task_level_non_fatal_indexing_failure() -> bool:
         queued = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main",
             commit_sha="ragindex40000000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
 
         result = analysis_tasks.run_repository_analysis(str(queued.id))
@@ -480,7 +481,8 @@ def run_live_bonus() -> bool:
 
             _clear_previous_runs(db, repository)
             queued = create_queued_analysis_run(
-                db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+                db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+                trigger_source=AnalysisRunTriggerSource.MANUAL,
             )
 
             celery_app.conf.task_always_eager = True

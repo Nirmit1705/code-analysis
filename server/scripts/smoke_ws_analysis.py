@@ -65,7 +65,7 @@ from starlette.testclient import WebSocketDisconnect  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import create_access_token, encrypt_token  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.branch import Branch  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
 from app.models.user import User  # noqa: E402
@@ -184,7 +184,7 @@ def run_wrong_owner() -> bool:
             db, owner_user, github_repo_id="smoke-ws-analysis-wrong-owner", owner="smoke-ws", name="wrong-owner"
         )
         _clear_previous_runs(db, repository)
-        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="a" * 40)
+        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="a" * 40, trigger_source=AnalysisRunTriggerSource.MANUAL)
 
         other_token = create_access_token(subject=other_user.email)
         client = TestClient(app)
@@ -230,7 +230,7 @@ def run_terminal_snapshot() -> bool:
             db, user, github_repo_id="smoke-ws-analysis-terminal", owner="smoke-ws", name="terminal"
         )
         _clear_previous_runs(db, repository)
-        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="b" * 40)
+        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="b" * 40, trigger_source=AnalysisRunTriggerSource.MANUAL)
         queued.status = AnalysisRunStatus.COMPLETED
         db.add(queued)
         db.commit()
@@ -266,7 +266,7 @@ def run_live_progress_relay() -> bool:
             db, user, github_repo_id="smoke-ws-analysis-relay", owner="smoke-ws", name="relay"
         )
         _clear_previous_runs(db, repository)
-        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="c" * 40)
+        queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha="c" * 40, trigger_source=AnalysisRunTriggerSource.MANUAL)
 
         token = create_access_token(subject=user.email)
         client = TestClient(app)

@@ -94,7 +94,7 @@ from app.analysis import ingestion as ingestion_module  # noqa: E402
 from app.analysis.ingestion import IngestedFile, IngestionResult  # noqa: E402
 from app.analysis.pipeline import AnalysisResult, analyze_ingested  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.debt_issue import DebtIssue  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
@@ -187,7 +187,7 @@ def _persist_cyclic_fixture(db: Session, repository: Repository, *, commit_sha: 
     rows, not a hand-built shortcut."""
     result = analyze_ingested(_cyclic_ingestion_result(), commit_sha=commit_sha)
 
-    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run, _file_id_by_path, _symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=queued_run, analysis_result=result
     )
@@ -274,7 +274,8 @@ def run_task_level_forced_provider_failure() -> bool:
             _Patch(insight_service, "GroqProvider", lambda: _StubProvider('{"insights": []}')),
         ]
         reference_queued = create_queued_analysis_run(
-            db, repository_id=repository.id, branch="main", commit_sha="aiinsightref0000000000000000000000000000"[:40]
+            db, repository_id=repository.id, branch="main", commit_sha="aiinsightref0000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
         try:
             reference_result = analysis_tasks.run_repository_analysis(str(reference_queued.id))
@@ -311,6 +312,7 @@ def run_task_level_forced_provider_failure() -> bool:
         forced_queued = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main",
             commit_sha="aiinsightforced00000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
         try:
             forced_result = analysis_tasks.run_repository_analysis(str(forced_queued.id))
@@ -390,7 +392,8 @@ def run_task_level_unexpected_exception_in_insight_stage() -> bool:
         )
         _clear_previous_runs(db, repository)
         queued = create_queued_analysis_run(
-            db, repository_id=repository.id, branch="main", commit_sha="aiinsightbug0000000000000000000000000000"[:40]
+            db, repository_id=repository.id, branch="main", commit_sha="aiinsightbug0000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
 
         result = analysis_tasks.run_repository_analysis(str(queued.id))
@@ -453,7 +456,8 @@ def run_live_bonus() -> bool:
 
             _clear_previous_runs(db, repository)
             queued = create_queued_analysis_run(
-                db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+                db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+                trigger_source=AnalysisRunTriggerSource.MANUAL,
             )
 
             celery_app.conf.task_always_eager = True

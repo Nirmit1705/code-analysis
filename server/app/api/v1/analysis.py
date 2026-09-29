@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.models.analysis_run import AnalysisRun
+from app.models.analysis_run import AnalysisRun, AnalysisRunTriggerSource
 from app.models.branch import Branch
 from app.models.repository import Repository
 from app.models.user import User
@@ -102,7 +102,11 @@ def create_analysis_run(
     commit_sha = gh_branch["commit"]["sha"]
 
     analysis_run = repo_service.create_queued_analysis_run(
-        db, repository_id=repository.id, branch=branch.name, commit_sha=commit_sha
+        db,
+        repository_id=repository.id,
+        branch=branch.name,
+        commit_sha=commit_sha,
+        trigger_source=AnalysisRunTriggerSource.MANUAL,
     )
 
     run_repository_analysis.delay(str(analysis_run.id))

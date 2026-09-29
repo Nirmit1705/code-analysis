@@ -33,6 +33,16 @@ class AnalysisRunStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class AnalysisRunTriggerSource(str, enum.Enum):
+    """Why an `AnalysisRun` was queued (Phase 9.5): a user-initiated `POST
+    /repos/{id}/analysis-runs` vs. a GitHub `push` webhook delivery. Stored
+    as a plain VARCHAR like the other status enums here — and, per Known
+    Issue #15, as the member *name* (`"MANUAL"`/`"WEBHOOK"`), not `.value`."""
+
+    MANUAL = "manual"
+    WEBHOOK = "webhook"
+
+
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
     __table_args__ = (
@@ -58,6 +68,19 @@ class AnalysisRun(Base):
     # requiring every caller to pass it explicitly. Phase 5's Celery state
     # machine may later want this to instead mark when processing actually
     # began (vs. when it was queued); revisit then if the two need to diverge.
+    # Phase 9.5. No Python-level `default=` on purpose — every insert path
+    # (manual endpoint, webhook) must pass this explicitly. The
+    # `server_default` exists only to backfill pre-9.5 rows during the
+    # migration, and is the enum member's *name* (`"MANUAL"`), not its
+    # `.value`: unlike `status`'s dead `server_default` (Known Issue #15),
+    # this one is genuinely exercised (backfill, and any direct-ORM insert
+    # that omits the column), so a lowercase literal here would leave those
+    # rows unreadable (`LookupError` on the next SELECT).
+    trigger_source: Mapped[AnalysisRunTriggerSource] = mapped_column(
+        Enum(AnalysisRunTriggerSource, native_enum=False, length=16),
+        server_default=AnalysisRunTriggerSource.MANUAL.name,
+        nullable=False,
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

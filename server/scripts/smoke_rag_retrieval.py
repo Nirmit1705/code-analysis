@@ -84,7 +84,7 @@ from app.analysis.dependencies import DependencyEdgeType  # noqa: E402
 from app.analysis.language_detect import Language  # noqa: E402
 from app.analysis.symbols import SymbolKind  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.dependency import DependencyEdge  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.rag_chunk import EMBEDDING_DIM, RagChunk  # noqa: E402
@@ -503,7 +503,7 @@ def run_live_bonus() -> bool:
             db.commit()
 
             _clear_previous_runs(db, repository)
-            queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+            queued = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha, trigger_source=AnalysisRunTriggerSource.MANUAL)
 
             celery_app.conf.task_always_eager = True
             async_result = analysis_tasks.run_repository_analysis.delay(str(queued.id))

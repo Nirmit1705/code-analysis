@@ -58,6 +58,7 @@ from app.analysis.pipeline import analyze_ingested  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.models.rag_chunk import EMBEDDING_DIM, RagChunk  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
+from app.models.analysis_run import AnalysisRunTriggerSource  # noqa: E402
 from app.services.repo_service import (  # noqa: E402
     create_queued_analysis_run,
     finalize_analysis_run_completed,
@@ -96,7 +97,7 @@ def _build_fixture_chunk_and_ids(db: Session, repository: Repository):
     result = analyze_ingested(ingestion_result, commit_sha=commit_sha)
 
     _clear_previous_runs(db, repository)
-    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run, file_id_by_path, symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=queued_run, analysis_result=result
     )

@@ -63,7 +63,7 @@ from app.analysis import pipeline  # noqa: E402
 from app.analysis.ingestion import IngestedFile, IngestionResult  # noqa: E402
 from app.analysis.language_detect import Language  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.repository import Repository, RepositoryAnalysisStatus  # noqa: E402
 from app.models.symbol import Symbol as SymbolRow  # noqa: E402
@@ -210,6 +210,7 @@ def run_happy_path() -> bool:
         queued = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main",
             commit_sha="happy0000000000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
 
         result = analysis_tasks.run_repository_analysis(str(queued.id))
@@ -285,6 +286,7 @@ def run_per_file_failure() -> bool:
         queued = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main",
             commit_sha="perfile00000000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
 
         result = analysis_tasks.run_repository_analysis(str(queued.id))
@@ -357,6 +359,7 @@ def run_forced_failure() -> bool:
         queued = create_queued_analysis_run(
             db, repository_id=repository.id, branch="main",
             commit_sha="failure00000000000000000000000000000000"[:40],
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
         )
 
         result = analysis_tasks.run_repository_analysis(str(queued.id))  # must not raise
@@ -447,7 +450,8 @@ def run_live_bonus() -> bool:
 
             _clear_previous_runs(db, repository)
             queued = create_queued_analysis_run(
-                db, repository_id=repository.id, branch="main", commit_sha=commit_sha
+                db, repository_id=repository.id, branch="main", commit_sha=commit_sha,
+                trigger_source=AnalysisRunTriggerSource.MANUAL,
             )
 
             # Celery eager mode: .delay() executes synchronously in this

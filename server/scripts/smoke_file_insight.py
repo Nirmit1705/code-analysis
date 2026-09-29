@@ -82,7 +82,7 @@ from app.analysis.chunking import RagChunkType  # noqa: E402
 from app.analysis.ingestion import IngestionResult  # noqa: E402
 from app.analysis.pipeline import AnalysisResult, analyze_ingested  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.models.analysis_run import AnalysisRun  # noqa: E402
+from app.models.analysis_run import AnalysisRun, AnalysisRunTriggerSource  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.rag_chunk import EMBEDDING_DIM, RagChunk  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
@@ -146,7 +146,7 @@ def _persist_acyclic_fixture(db: Session, repository: Repository) -> tuple[Analy
     result = analyze_ingested(ingestion_result, commit_sha=commit_sha)
 
     _clear_previous_runs(db, repository)
-    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha)
+    queued_run = create_queued_analysis_run(db, repository_id=repository.id, branch="main", commit_sha=commit_sha, trigger_source=AnalysisRunTriggerSource.MANUAL)
     run, file_id_by_path, symbol_id_by_symbol = persist_analysis_run(
         db, analysis_run=queued_run, analysis_result=result
     )

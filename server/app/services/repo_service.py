@@ -30,7 +30,7 @@ from app.analysis.dependencies import DependencyEdge, DependencyEdgeType
 from app.analysis.graph import analyze_dependency_graph
 from app.analysis.pipeline import AnalysisResult
 from app.analysis.symbols import Symbol
-from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
+from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource
 from app.models.api_endpoint import ApiEndpoint
 from app.models.branch import Branch
 from app.models.debt_issue import DebtIssue
@@ -226,8 +226,64 @@ def select_branch(db: Session, repository: Repository, branch_name: str, commit_
     return target
 
 
+def list_repositories_by_github_repo_id(db: Session, github_repo_id: str) -> list[Repository]:
+    """Every `Repository` row (across *all* users) for one GitHub repo id.
+    Unscoped by user, unlike every other by-github-id lookup here — Phase
+    9.5's webhook payload carries no Substrate user at all, only GitHub's own
+    numeric repo id. `github_repo_id` is only unique per `(connected_user_id,
+    github_repo_id)`, so if several Substrate users connected the same GitHub
+    repo this returns all of them and the webhook fans out to each (Known
+    Issue #28, resolved). Oldest first, so ordering is deterministic."""
+    return list(
+        db.execute(
+            select(Repository)
+            .where(Repository.github_repo_id == github_repo_id)
+            .order_by(Repository.created_at.asc(), Repository.id.asc())
+        ).scalars()
+    )
+
+
+def lock_analysis_run_slot(db: Session, *, repository_id: uuid.UUID, branch: str, commit_sha: str) -> None:
+    """Takes a transaction-scoped Postgres advisory lock keyed on
+    `(repository_id, branch, commit_sha)`. Serializes concurrent webhook
+    deliveries for the same commit so `has_analysis_run_for_commit` +
+    `create_queued_analysis_run` can't both pass the check (a redelivery
+    racing the original). Released automatically when the session's
+    transaction ends — `create_queued_analysis_run`'s own commit, or a
+    `db.rollback()` on the skip path — so callers never unlock explicitly."""
+    key = f"{repository_id}:{branch}:{commit_sha}"
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
+
+
+def has_analysis_run_for_commit(db: Session, *, repository_id: uuid.UUID, branch: str, commit_sha: str) -> bool:
+    """True if this repository already has a non-`FAILED` run (queued,
+    in-flight or completed) for exactly this branch + commit. A `FAILED` run
+    doesn't count, so a redelivery after a failed enqueue/analysis retries.
+    Used by the webhook to make redelivered/duplicate `push` events
+    idempotent (Known Issue #28) — deliberately *not* used by the manual
+    endpoint, where re-analyzing the same commit is an explicit user action."""
+    return (
+        db.execute(
+            select(AnalysisRun.id)
+            .where(
+                AnalysisRun.repository_id == repository_id,
+                AnalysisRun.branch == branch,
+                AnalysisRun.commit_sha == commit_sha,
+                AnalysisRun.status != AnalysisRunStatus.FAILED,
+            )
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
 def create_queued_analysis_run(
-    db: Session, *, repository_id: uuid.UUID, branch: str, commit_sha: str
+    db: Session,
+    *,
+    repository_id: uuid.UUID,
+    branch: str,
+    commit_sha: str,
+    trigger_source: AnalysisRunTriggerSource,
 ) -> AnalysisRun:
     """Phase 5's async-lifecycle entry point: a lightweight, insert-only
     counterpart to `persist_analysis_run` below. Called synchronously from
@@ -263,6 +319,7 @@ def create_queued_analysis_run(
         branch=branch,
         commit_sha=commit_sha,
         status=AnalysisRunStatus.QUEUED,
+        trigger_source=trigger_source,
     )
     repository.analysis_status = RepositoryAnalysisStatus.QUEUED
 
