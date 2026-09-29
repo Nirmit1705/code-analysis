@@ -13,6 +13,7 @@ from app.api.v1 import (
     dependencies,
     github,
     impact,
+    webhooks,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -27,3 +28,4 @@ api_router.include_router(dependencies.router)
 api_router.include_router(assistant.router)
 api_router.include_router(compare.router)
 api_router.include_router(impact.router)
+api_router.include_router(webhooks.router)

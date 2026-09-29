@@ -69,13 +69,13 @@ uv run celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 
 ### 4. Smee relay (webhook work only)
 
-Not needed for normal API/analysis development — only when testing GitHub webhook delivery (which the app doesn't yet handle; see below).
+Not needed for normal API/analysis development — only when testing GitHub webhook delivery (a signed `push` to a repository's selected branch queues a re-analysis; see below).
 
 ```
 npx smee-client@latest --url <your SMEE_WEBHOOK_URL from .env> --path /api/v1/webhooks/github --port 8000
 ```
 
-This forwards webhook deliveries from your Smee channel to the local FastAPI server. **The target route (`/api/v1/webhooks/github`) doesn't exist yet** (it's built in a later phase) — forwarded deliveries will harmlessly 404 until then. That's expected, not a bug.
+This forwards webhook deliveries from your Smee channel to the local FastAPI server. The target route (`/api/v1/webhooks/github`, Phase 9.5) verifies the `X-Hub-Signature-256` HMAC against `GITHUB_WEBHOOK_SECRET` (which must match the secret configured on the GitHub App) and answers `401` for a bad/missing signature. A valid `push` to the repository's selected branch returns `202` and queues a `webhook`-triggered analysis run (the Celery worker must be running to process it); every other valid delivery (e.g. GitHub's `ping`, other branches/events) returns `200 {"status":"ignored",...}`.
 
 ## Quick sanity check
 
@@ -88,6 +88,6 @@ This forwards webhook deliveries from your Smee channel to the local FastAPI ser
 - **Wrong Postgres port** — native dev Postgres is `5432`; the `docker-compose.yml` Postgres service (doc-only, not used by default) is `5433`. Don't mix them up in `DATABASE_URL`.
 - **Redis connection refused** — make sure Docker Desktop is running before `docker compose up -d redis`.
 - **Celery worker won't start / hangs on Windows** — you're likely missing `--pool=solo`; the default prefork pool isn't supported on native Windows.
-- **Smee deliveries 404** — expected until the webhook route is built; not a sign anything is misconfigured.
+- **Smee deliveries return 401** — the signature check failed: `GITHUB_WEBHOOK_SECRET` in `server/.env` doesn't match the webhook secret on the GitHub App (or is empty — an empty secret rejects everything by design).
 - **Smee client fails with `Error: The provided URL is invalid.`** — if you're running the command from **Git Bash** (MSYS), its automatic Unix-path conversion silently rewrites a leading-`/` argument like `--path /api/v1/webhooks/github` into something like `C:/Program Files/Git/api/v1/webhooks/github`, which then fails URL validation. Run the Smee command from PowerShell or `cmd.exe` instead (verified working there), or, if you must use Git Bash, disable the conversion for that one call: `MSYS_NO_PATHCONV=1 npx smee-client@latest --url ... --path /api/v1/webhooks/github --port 8000`.
 - **An analysis run completes but has no RAG chunks** — RAG indexing (Phase 7.5) is deliberately non-fatal: a failed embedding call (no network for the first-run model download, out of memory, etc.) is logged server-side but never fails the run — `AnalysisRun.status` still reaches `COMPLETED`. Check the worker's log for `RAG indexing failed` around that run's timestamp; the run's `rag_chunks` stay empty (or partial) until a subsequent run succeeds, and Phase 7.6+ retrieval has nothing to find in the meantime.
