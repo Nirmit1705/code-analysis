@@ -1,5 +1,7 @@
 """Password hashing, JWT issue/verify, and encryption for secrets at rest."""
 
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
@@ -49,6 +51,20 @@ def create_action_token(subject: str, action_type: str, expires_delta: timedelta
     expire = datetime.now(timezone.utc) + expires_delta
     payload: dict[str, Any] = {"sub": subject, "exp": expire, "type": action_type}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def verify_github_webhook_signature(payload: bytes, signature_header: str | None, secret: str) -> bool:
+    """Checks GitHub's `X-Hub-Signature-256` header (`sha256=<hex>`, HMAC-SHA256
+    of the *raw* request body keyed by the webhook secret). Never raises:
+    a missing/malformed header, or an unset `secret`, is simply `False` — an
+    empty secret must fail closed, since HMAC with an empty key is trivially
+    forgeable by anyone. Compared as bytes so a non-ASCII header value can't
+    make `hmac.compare_digest` raise `TypeError` (it only accepts ASCII-only
+    `str`s), which would surface as a 500 on attacker-controlled input."""
+    if not secret or not signature_header:
+        return False
+    expected = "sha256=" + hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected.encode("utf-8"), signature_header.encode("utf-8"))
 
 
 @lru_cache
