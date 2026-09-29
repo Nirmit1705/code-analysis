@@ -33,7 +33,7 @@ decisions #5/#6):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from app.analysis.dependencies import DependencyEdge, DependencyEdgeType
 from app.analysis.language_detect import Language
@@ -108,6 +108,25 @@ def diff_analysis_runs(base: RunFacts, head: RunFacts) -> ChangeSet:
         added_edges=sorted(added_edges, key=_edge_key),
         removed_edges=sorted(removed_edges, key=_edge_key),
     )
+
+
+ChangeKind = Literal["breaking", "non_breaking"]
+
+
+def classify_change(change_set: ChangeSet) -> ChangeKind:
+    """`"breaking"` iff the change *removed* something a dependent could rely
+    on — a file, a symbol (a renamed symbol is a removal + an addition, so it
+    counts) or an API endpoint. Anything else (only additions, and/or edits
+    inside existing bodies, imports added or dropped) is `"non_breaking"`.
+
+    Deliberately coarse and honest about what it cannot see: this codebase
+    has no signature/behaviour diff, so a `"non_breaking"` change can still
+    alter what a dependent observes at runtime — it only means the *surface*
+    (names and endpoints) is intact. Consumed by `impact_service`'s risk
+    multiplier (Phase 9.5 follow-up); Compare doesn't use it."""
+    if change_set.removed_files or change_set.removed_symbols or change_set.removed_apis:
+        return "breaking"
+    return "non_breaking"
 
 
 # --- natural keys ------------------------------------------------------------

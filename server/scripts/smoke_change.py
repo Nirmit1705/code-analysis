@@ -35,6 +35,7 @@ from app.analysis.change import (  # noqa: E402
     FileFact,
     RunFacts,
     SymbolFact,
+    classify_change,
     diff_analysis_runs,
 )
 from app.analysis.dependencies import DependencyEdge, DependencyEdgeType  # noqa: E402
@@ -206,10 +207,58 @@ def run_no_difference() -> bool:
     )
 
 
+def run_classify_change() -> bool:
+    print("\n=== classify_change: breaking iff a file, symbol or API was removed ===")
+    base, head = _build_fixture()
+    ok = _check(
+        "fixture diff (removed file/symbol/API) -> breaking",
+        classify_change(diff_analysis_runs(base, head)) == "breaking",
+    )
+    ok &= _check(
+        "identical runs -> non_breaking", classify_change(diff_analysis_runs(head, head)) == "non_breaking"
+    )
+
+    f = FileFact(path="a.py", language=Language.PYTHON, loc=10)
+    s1 = SymbolFact(file_path="a.py", name="f", kind=SymbolKind.FUNCTION)
+    s2 = SymbolFact(file_path="a.py", name="g", kind=SymbolKind.FUNCTION)
+    api1 = ApiFact(method="GET", path="/a", file_path="a.py")
+    api2 = ApiFact(method="POST", path="/a", file_path="a.py")
+    edge = DependencyEdge(
+        source_file="a.py", module=".", language=Language.PYTHON, edge_type=DependencyEdgeType.EXTERNAL,
+        target_file=None, target_package="requests", raw_specifier="", line=0,
+    )
+    old = RunFacts(files=[f], symbols=[s1], apis=[api1], edges=[edge])
+
+    additive = RunFacts(
+        files=[f, FileFact(path="b.py", language=Language.PYTHON, loc=3)], symbols=[s1, s2], apis=[api1, api2], edges=[edge]
+    )
+    ok &= _check(
+        "only additions (file + symbol + API) -> non_breaking", classify_change(diff_analysis_runs(old, additive)) == "non_breaking"
+    )
+
+    edited = RunFacts(files=[FileFact(path="a.py", language=Language.PYTHON, loc=99)], symbols=[s1], apis=[api1], edges=[])
+    ok &= _check(
+        "edit inside a body (LOC changed) + an import dropped -> non_breaking",
+        classify_change(diff_analysis_runs(old, edited)) == "non_breaking",
+    )
+
+    renamed = RunFacts(files=[f], symbols=[s2], apis=[api1], edges=[edge])
+    ok &= _check("symbol renamed (removal + addition) -> breaking", classify_change(diff_analysis_runs(old, renamed)) == "breaking")
+
+    api_gone = RunFacts(files=[f], symbols=[s1], apis=[], edges=[edge])
+    ok &= _check("API endpoint removed -> breaking", classify_change(diff_analysis_runs(old, api_gone)) == "breaking")
+
+    file_gone = RunFacts(files=[], symbols=[], apis=[], edges=[])
+    ok &= _check("file removed -> breaking", classify_change(diff_analysis_runs(old, file_gone)) == "breaking")
+    return ok
+
+
 if __name__ == "__main__":
     r1 = run_full_diff()
     r2 = run_no_difference()
+    r3 = run_classify_change()
     print("\n=== Summary ===")
-    print(f"full_diff:      {'PASS' if r1 else 'FAIL'}")
-    print(f"no_difference:  {'PASS' if r2 else 'FAIL'}")
-    sys.exit(0 if (r1 and r2) else 1)
+    print(f"full_diff:        {'PASS' if r1 else 'FAIL'}")
+    print(f"no_difference:    {'PASS' if r2 else 'FAIL'}")
+    print(f"classify_change:  {'PASS' if r3 else 'FAIL'}")
+    sys.exit(0 if (r1 and r2 and r3) else 1)
