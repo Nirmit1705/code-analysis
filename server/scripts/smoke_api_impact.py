@@ -211,6 +211,19 @@ def run_happy_path() -> bool:
         all_passed &= _check("affected_apis == []", body["affected_apis"] == [], str(body["affected_apis"]))
         all_passed &= _check("risk == LOW", body["risk"] == "LOW", str(body))
         all_passed &= _check("score == 0", body["score"] == 0, str(body))
+        all_passed &= _check(
+            "breakdown: 0 pts everywhere, change_kind == breaking (a file was removed), x1.0, 0 tests excluded",
+            body["breakdown"]
+            == {
+                "file_points": 0.0,
+                "api_points": 0.0,
+                "cycle_bonus": 0.0,
+                "change_kind": "breaking",
+                "multiplier": 1.0,
+                "excluded_test_files": 0,
+            },
+            str(body.get("breakdown")),
+        )
         all_passed &= _check("explanation is None (9.7's job)", body["explanation"] is None, str(body))
         return all_passed
     finally:

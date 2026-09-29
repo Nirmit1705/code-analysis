@@ -20,6 +20,18 @@ class ImpactedFileSchema(BaseModel):
     hops: int | None = None
 
 
+class ScoreBreakdownSchema(BaseModel):
+    """Mirrors `services/impact_service.py::ScoreBreakdown`. `file_points +
+    api_points + cycle_bonus`, times `multiplier`, capped at 100, is `score`."""
+
+    file_points: float
+    api_points: float
+    cycle_bonus: float
+    change_kind: Literal["breaking", "non_breaking"]
+    multiplier: float
+    excluded_test_files: int
+
+
 class ImpactRead(BaseModel):
     analysis_run_id: uuid.UUID
     previous_analysis_run_id: uuid.UUID
@@ -30,4 +42,5 @@ class ImpactRead(BaseModel):
     direct: list[ImpactedFileSchema]
     indirect: list[ImpactedFileSchema]
     affected_apis: list[str]
+    breakdown: ScoreBreakdownSchema
     explanation: str | None = None

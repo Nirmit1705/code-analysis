@@ -21,12 +21,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.analysis.change import diff_analysis_runs
+from app.analysis.change import classify_change, diff_analysis_runs
 from app.api.deps import get_current_user, get_db
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.models.repository import Repository
 from app.models.user import User
-from app.schemas.impact import ImpactedFileSchema, ImpactRead
+from app.schemas.impact import ImpactedFileSchema, ImpactRead, ScoreBreakdownSchema
 from app.services import analysis_read_service, impact_service, repo_service
 
 router = APIRouter(tags=["impact"])
@@ -83,7 +83,10 @@ def get_impact(
         | set(change_set.modified_files)
     )
     result = impact_service.compute_impact(
-        db, head_analysis_run_id=head_run.id, changed_file_paths=changed_file_paths
+        db,
+        head_analysis_run_id=head_run.id,
+        changed_file_paths=changed_file_paths,
+        change_kind=classify_change(change_set),
     )
 
     return ImpactRead(
@@ -96,5 +99,13 @@ def get_impact(
         direct=[ImpactedFileSchema(path=f.path, why=f.why, hops=f.hops) for f in result.direct],
         indirect=[ImpactedFileSchema(path=f.path, why=f.why, hops=f.hops) for f in result.indirect],
         affected_apis=result.affected_apis,
+        breakdown=ScoreBreakdownSchema(
+            file_points=result.breakdown.file_points,
+            api_points=result.breakdown.api_points,
+            cycle_bonus=result.breakdown.cycle_bonus,
+            change_kind=result.breakdown.change_kind,
+            multiplier=result.breakdown.multiplier,
+            excluded_test_files=result.breakdown.excluded_test_files,
+        ),
         explanation=None,
     )
