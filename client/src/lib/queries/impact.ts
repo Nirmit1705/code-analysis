@@ -14,6 +14,19 @@ export interface ImpactedFile {
   hops: number | null;
 }
 
+/** Mirrors `ScoreBreakdownSchema`: `(file_points + api_points +
+ * cycle_bonus) * multiplier`, capped at 100, is `ImpactRead.score`. */
+export interface ImpactBreakdown {
+  file_points: number;
+  api_points: number;
+  cycle_bonus: number;
+  change_kind: "breaking" | "non_breaking";
+  multiplier: number;
+  /** Test files the change reaches — still listed in `direct`/`indirect`,
+   * but never scored. */
+  excluded_test_files: number;
+}
+
 /** Mirrors `ImpactRead`. `explanation` is always `null` until Phase 9.7
  * wires up the AI narrative. */
 export interface ImpactRead {
@@ -26,6 +39,7 @@ export interface ImpactRead {
   direct: ImpactedFile[];
   indirect: ImpactedFile[];
   affected_apis: string[];
+  breakdown: ImpactBreakdown;
   explanation: string | null;
 }
 

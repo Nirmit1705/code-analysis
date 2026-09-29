@@ -46,25 +46,29 @@ function riskTone(risk: ImpactRisk): Tone {
   return risk === "HIGH" ? "danger" : risk === "MEDIUM" ? "warning" : "success";
 }
 
-/** Grounded only in fields `ImpactRead` actually returns — this deliberately
- * never claims *why* the risk bucket landed where it did (e.g. a coupling or
- * circular-file bonus), since that reasoning lives inside `_compute_risk`
- * and isn't part of the response schema. */
+function formatPoints(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+/** Built from `ImpactRead.breakdown` (the server's own arithmetic), so it
+ * states exactly how the score was reached and never claims a cause the
+ * response can't back up. */
 function impactCaption(data: ImpactRead): string {
-  const depCount = data.direct.length + data.indirect.length;
-  if (depCount === 0 && data.affected_apis.length === 0) {
-    return "No downstream dependents and no affected endpoints.";
+  const b = data.breakdown;
+  const testNote =
+    b.excluded_test_files > 0
+      ? ` ${b.excluded_test_files} test file${b.excluded_test_files === 1 ? "" : "s"} also reached by this change, listed below but not scored.`
+      : "";
+  if (data.direct.length + data.indirect.length === 0 && data.affected_apis.length === 0) {
+    return `No downstream dependents and no affected endpoints.${testNote}`;
   }
-  const bits: string[] = [];
-  if (depCount > 0) {
-    bits.push(
-      `${data.direct.length} direct and ${data.indirect.length} indirect dependent${depCount === 1 ? "" : "s"}`,
-    );
-  }
-  if (data.affected_apis.length > 0) {
-    bits.push(`${data.affected_apis.length} affected endpoint${data.affected_apis.length === 1 ? "" : "s"}`);
-  }
-  return `Score reflects ${bits.join(" and ")}.`;
+  const terms = [`${formatPoints(b.file_points)} from dependents`, `${formatPoints(b.api_points)} from endpoints`];
+  if (b.cycle_bonus > 0) terms.push(`${formatPoints(b.cycle_bonus)} for a changed file in a dependency cycle`);
+  const kind =
+    b.change_kind === "breaking"
+      ? "this change removed a file, symbol or endpoint"
+      : "no file, symbol or endpoint was removed";
+  return `Score ${data.score} = (${terms.join(" + ")}) \u00d7 ${b.multiplier} — ${kind}.${testNote}`;
 }
 
 function groupByBranch(runs: AnalysisRunRead[]): Array<[string, AnalysisRunRead[]]> {
