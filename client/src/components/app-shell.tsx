@@ -183,7 +183,7 @@ export function TopBar() {
 // the collapsed width (+ its left gutter) on `main`; expanding *overlays* the
 // content rather than pushing it, so pages never reflow on hover.
 const NAV_COLLAPSED = "w-[52px]";
-const NAV_EXPANDED = "hover:w-[248px] focus-within:w-[248px]";
+const NAV_EXPANDED = "hover:w-[248px] has-[:focus-visible]:w-[248px]";
 
 /** Desktop-only (`lg+`) icon rail in a tall capsule: icons only until the
  * pointer (or keyboard focus) enters it, then it widens to reveal labels.
@@ -193,11 +193,12 @@ export function SideNav() {
   // Labels fade in with the width; `whitespace-nowrap` + the nav's own
   // `overflow-hidden` keep them from wrapping mid-transition.
   const reveal =
-    "whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/nav:opacity-100 group-focus-within/nav:opacity-100 group-hover/nav:delay-75";
+    "whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/nav:opacity-100 group-has-[:focus-visible]/nav:opacity-100 group-hover/nav:delay-75";
 
   return (
     <nav
       aria-label="Primary"
+      data-side-nav
       className={cn(
         // Outer shell: width, the soft ring and the inner shadow. It never
         // scrolls — the inner div below does — so the ring stays put.
@@ -219,7 +220,7 @@ export function SideNav() {
           <div key={group.section}>
             {/* A hairline when collapsed, the section name when expanded. */}
             <div className="relative my-1 h-4">
-              <span className="absolute inset-x-2.5 top-1/2 h-px bg-border transition-opacity duration-150 group-hover/nav:opacity-0 group-focus-within/nav:opacity-0" />
+              <span className="absolute inset-x-2.5 top-1/2 h-px bg-border transition-opacity duration-150 group-hover/nav:opacity-0 group-has-[:focus-visible]/nav:opacity-0" />
               <p className={cn("label-xs absolute inset-y-0 left-3 flex items-center", reveal)}>
                 {group.section}
               </p>
@@ -281,14 +282,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen ambient-app">
       <TopBar />
       {/* `lg:pl-[76px]` = capsule gutter (12) + collapsed width (52) + gap (12).
-          While the capsule is hovered/focused the content's left offset grows to
-          272px = gutter (12) + expanded width (248) + gap (12), i.e. by exactly
-          the amount the capsule widens, on the same 200ms ease — so the content
-          never sits under it. Pure CSS via `:has()`, no shared state. Padding,
-          not a transform, so nothing is clipped off the right edge; the page
-          reflows to the narrower width instead. Keep 256 in sync with
-          `NAV_EXPANDED`. */}
-      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[76px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[nav:hover]:pl-[272px] lg:has-[nav:focus-within]:pl-[272px]">
+          While the capsule is hovered (or keyboard-focused) the content's left
+          offset grows to 272px = gutter (12) + expanded width (248) + gap (12),
+          i.e. by exactly the amount the capsule widens, on the same 200ms ease
+          — so the content never sits under it. Pure CSS via `:has()`, no shared
+          state. Padding, not a transform, so nothing is clipped off the right
+          edge; the page reflows to the narrower width instead. Keep 272 in sync
+          with `NAV_EXPANDED`.
+
+          Two scoping rules, both learned from real bugs: the selector targets
+          `[data-side-nav]`, never a bare `nav` (a page's own `<nav>`, e.g. the
+          Dependencies scope tabs, used to trigger the shift on hover), and it
+          uses `:focus-visible`, never `:focus-within` (a link clicked with the
+          mouse keeps focus, which left the capsule stuck open). */}
+      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[76px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[[data-side-nav]:hover]:pl-[272px] lg:has-[[data-side-nav]_:focus-visible]:pl-[272px]">
         <SideNav />
         <main className="min-w-0 flex-1">{children}</main>
       </div>
