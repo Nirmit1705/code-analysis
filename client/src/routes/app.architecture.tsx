@@ -2,11 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Search, Layers, X } from "lucide-react";
 
-import { ArchGraph, nodeById, type ModuleKind } from "@/components/arch-graph";
+import { ArchGraph, KIND_META, nodeById, type ModuleKind } from "@/components/arch-graph";
 import { Panel, PanelHeader, Tag } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
-import { layoutNodes, toArchGraphEdges } from "@/lib/graph-layout";
-import { useArchitecture } from "@/lib/queries/architecture";
+import { toArchGraphEdges } from "@/lib/graph-layout";
+import { circularSummary, useArchitecture } from "@/lib/queries/architecture";
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
@@ -49,14 +49,17 @@ function Architecture() {
   const [group, setGroup] = useState<"service" | "module">("service");
 
   const data = architecture.data;
-  const positioned = data ? layoutNodes(data.nodes) : [];
+  // `ArchGraph` lays itself out; these are the plain backend nodes.
+  const positioned = data?.nodes ?? [];
   const archGraphEdges = data ? toArchGraphEdges(data.edges) : [];
   const edges = data?.edges ?? [];
-  const circularCount = edges.filter((e) => e.circular).length;
 
   const node = selected ? nodeById(positioned, selected) : null;
+  // In a cycle either through a flagged edge to another node, or entirely
+  // within itself (`circular_files`, which has no edge to carry a flag).
   const isCircularNode = node
-    ? edges.some((e) => e.circular && (e.source === node.id || e.target === node.id))
+    ? node.circular_files > 0 ||
+      edges.some((e) => e.circular && (e.source === node.id || e.target === node.id))
     : false;
   const dependencies = node
     ? edges.filter((e) => e.source === node.id).map((e) => nodeById(positioned, e.target)!)
@@ -67,7 +70,7 @@ function Architecture() {
 
   const subtitle = !data?.analyzed
     ? "—"
-    : `${data.nodes.length} components · ${data.edges.length} inferred edges · ${circularCount} circular ${circularCount === 1 ? "edge" : "edges"}`;
+    : `${data.nodes.length} components · ${data.edges.length} inferred edges · ${circularSummary(data)}`;
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col gap-3 p-4">
@@ -114,12 +117,16 @@ function Architecture() {
               key={k.id}
               onClick={() => setActive((a) => (on ? a.filter((x) => x !== k.id) : [...a, k.id]))}
               className={cn(
-                "focus-ring rounded-sm border px-2 py-1 text-[11.5px]",
+                "focus-ring flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11.5px]",
                 on
                   ? "border-violet/45 bg-violet/15 text-foreground"
                   : "border-border text-muted-foreground hover:border-border-strong",
               )}
             >
+              <span
+                className="size-2.5 rounded-[4px]"
+                style={{ background: KIND_META[k.id].color }}
+              />
               {k.label}
             </button>
           );
@@ -214,7 +221,13 @@ function Architecture() {
                     </div>
                   </div>
 
-                  {isCircularNode ? <Tag tone="danger">Part of a circular dependency</Tag> : null}
+                  {isCircularNode ? (
+                    <Tag tone="danger">
+                      {node.circular_files > 0
+                        ? `${node.circular_files} of ${node.files} files are in a circular dependency`
+                        : "Part of a circular dependency"}
+                    </Tag>
+                  ) : null}
 
                   <div>
                     <p className="label-xs mb-1.5">Key files</p>

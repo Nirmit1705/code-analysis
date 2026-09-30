@@ -188,11 +188,13 @@ def _walk_real_repo(base: Path, rel_prefix: str, extensions: tuple[str, ...]) ->
     return files
 
 
-def _persist_cyclic_fixture(db: Session, repository: Repository) -> tuple[AnalysisRun, AnalysisResult]:
-    root = FIXTURES_DIR / "cyclic"
-    files = _load_ingested_files(root, "cyclic")
+def _persist_cyclic_fixture(
+    db: Session, repository: Repository, fixture: str = "cyclic"
+) -> tuple[AnalysisRun, AnalysisResult]:
+    root = FIXTURES_DIR / fixture
+    files = _load_ingested_files(root, fixture)
     ingestion_result = IngestionResult(root_dir=root, files=files, ignored_paths=[])
-    commit_sha = "cyclic".ljust(40, "0")[:40]
+    commit_sha = fixture.ljust(40, "0")[:40]
     result = analyze_ingested(ingestion_result, commit_sha=commit_sha)
 
     _clear_previous_runs(db, repository)
@@ -513,6 +515,71 @@ def run_architecture_cyclic_fixture() -> bool:
             str(body["edges"]),
         )
         all_passed &= _check("exactly 3 edges total (the os-builtin edge no longer exists)", len(body["edges"]) == 3, str(body["edges"]))
+
+        # A cross-node cycle is also reported per node: one cycle-member file in
+        # each of module_a/module_b, none in module_c/orphan_module.
+        circular_files = {n["id"]: n["circular_files"] for n in body["nodes"]}
+        all_passed &= _check(
+            "circular_files: module_a=1, module_b=1, module_c=0, orphan_module=0",
+            circular_files
+            == {"cyclic/module_a": 1, "cyclic/module_b": 1, "cyclic/module_c": 0, "cyclic/orphan_module": 0},
+            str(circular_files),
+        )
+        all_passed &= _check("cycle_count == 1", body["cycle_count"] == 1, str(body.get("cycle_count")))
+        return all_passed
+    finally:
+        db.close()
+
+
+# --- group 5b: a cycle entirely INSIDE one node (Known Issue #19) -------------------
+
+
+def run_architecture_same_group_cycle() -> bool:
+    """HireSight's real 14-file cycle lives entirely in one component, so no
+    inter-node edge exists to carry `circular=True` and `GET /architecture` used
+    to report no cycle at all while Dependencies listed it. The node's
+    `circular_files` (and the run's `cycle_count`) must surface it."""
+    print("\n=== group 5b: a 3-file cycle entirely inside ONE node is surfaced via circular_files ===")
+    db = SessionLocal()
+    try:
+        user = _get_or_create_user(db, "smoke-api-arch-samegroup@local.test")
+        repository = _get_or_create_repository(
+            db, user, github_repo_id="smoke-api-arch-samegroup", owner="smoke-api", name="same-group"
+        )
+        run, _ = _persist_cyclic_fixture(db, repository, fixture="same_group_cycle")
+
+        token = create_access_token(subject=user.email)
+        client = TestClient(app)
+        resp = client.get(f"/api/v1/repos/{repository.id}/architecture", headers=_auth(token))
+        all_passed = _check("GET -> 200", resp.status_code == 200, resp.text)
+        if not all_passed:
+            return False
+        body = resp.json()
+        nodes = {n["id"]: n for n in body["nodes"]}
+        all_passed &= _check(
+            "exactly one node, same_group_cycle/module_i, with 5 files (p, q, r, s + __init__.py)",
+            set(nodes) == {"same_group_cycle/module_i"} and nodes["same_group_cycle/module_i"]["files"] == 5,
+            str({k: v["files"] for k, v in nodes.items()}),
+        )
+        all_passed &= _check(
+            "no inter-node edge at all (every import is same-node) — the original blind spot",
+            body["edges"] == [],
+            str(body["edges"]),
+        )
+        all_passed &= _check(
+            "circular_files == 3 (p, q, r are in the cycle; s is not)",
+            nodes.get("same_group_cycle/module_i", {}).get("circular_files") == 3,
+            str(nodes),
+        )
+        all_passed &= _check("cycle_count == 1", body["cycle_count"] == 1, str(body.get("cycle_count")))
+
+        # The two screens must agree on the number of cycles.
+        dep = client.get(f"/api/v1/repos/{repository.id}/dependencies", headers=_auth(token)).json()
+        all_passed &= _check(
+            "matches Dependencies: one cycle of 3 files",
+            len(dep["circular"]) == body["cycle_count"] and len(dep["circular"][0]["files"]) == 3,
+            str(dep["circular"]),
+        )
         return all_passed
     finally:
         db.close()
@@ -742,6 +809,7 @@ def main() -> int:
     r3 = run_classify_modules_unit()
     r4 = run_load_dependency_edges_roundtrip()
     r5 = run_architecture_cyclic_fixture()
+    r5b = run_architecture_same_group_cycle()
     r6 = run_architecture_layering()
     r7 = run_real_repo_dogfood()
     r8 = run_live_bonus()
@@ -752,10 +820,11 @@ def main() -> int:
     print(f"3. classify_modules() unit:     {'PASS' if r3 else 'FAIL'}")
     print(f"4. load_dependency_edges:       {'PASS' if r4 else 'FAIL'}")
     print(f"5. Architecture (cyclic fixture): {'PASS' if r5 else 'FAIL'}")
+    print(f"5b. Same-node cycle surfaced:    {'PASS' if r5b else 'FAIL'}")
     print(f"6. Architecture layering (core fix): {'PASS' if r6 else 'FAIL'}")
     print(f"7. Real repo dogfood (secondary): {'PASS' if r7 else 'FAIL'}")
     print(f"8. Live bonus (non-gating):     {'PASS' if r8 else 'FAIL (see above)'}")
-    return 0 if (r1 and r2 and r3 and r4 and r5 and r6 and r7) else 1
+    return 0 if (r1 and r2 and r3 and r4 and r5 and r5b and r6 and r7) else 1
 
 
 if __name__ == "__main__":

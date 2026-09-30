@@ -33,6 +33,13 @@ class GraphNode(BaseModel):
     key_files: list[str]
     apis: list[str]
     insight: str = ""
+    # How many of this node's files belong to a real dependency cycle (Phase
+    # 4.2's `analyze_dependency_graph().cycles`, the same cycles the
+    # Dependencies screen lists). Needed in addition to `GraphEdge.circular`
+    # because a cycle entirely *inside* one node has no inter-node edge to
+    # carry a flag (same-group edges aren't drawn), so it would otherwise be
+    # invisible here while Dependencies reports it. 0 for external nodes.
+    circular_files: int = 0
 
 
 class GraphEdge(BaseModel):
@@ -60,3 +67,6 @@ class ArchitectureRead(BaseModel):
     analysis_run_id: uuid.UUID | None = None
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
+    # Number of dependency cycles in the run — the same count as the length of
+    # `DependenciesRead.circular`, so the two screens can quote one number.
+    cycle_count: int = 0

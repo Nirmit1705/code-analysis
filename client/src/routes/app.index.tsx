@@ -3,11 +3,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { RefreshCw, Sparkles, GitBranch, ArrowUpRight, ChevronsUpDown } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
-import { ArchGraph } from "@/components/arch-graph";
+import { ArchGraph, KIND_META, type ModuleKind } from "@/components/arch-graph";
 import { Panel, PanelHeader, Ring, StatCell, Tag, toneColor } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
-import { layoutNodes, toArchGraphEdges } from "@/lib/graph-layout";
-import { useArchitecture, type ArchitectureRead } from "@/lib/queries/architecture";
+import { toArchGraphEdges } from "@/lib/graph-layout";
+import { circularSummary, useArchitecture, type ArchitectureRead } from "@/lib/queries/architecture";
 import { useDashboard, type DashboardRead } from "@/lib/queries/dashboard";
 import { useRepositories } from "@/lib/queries/repos";
 
@@ -159,14 +159,13 @@ function DashboardBody({
 }) {
   const stats = data.stats!;
   const archData = architecture.data;
-  const positionedNodes = archData ? layoutNodes(archData.nodes) : [];
+  const positionedNodes = archData?.nodes ?? [];
   const archGraphEdges = archData ? toArchGraphEdges(archData.edges) : [];
-  const circularCount = archData ? archData.edges.filter((e) => e.circular).length : 0;
   const archSubtitle = architecture.isLoading
     ? "loading…"
     : !archData?.analyzed
       ? "not available"
-      : `${archData.nodes.length} components · ${archData.edges.length} inferred edges · ${circularCount} circular ${circularCount === 1 ? "edge" : "edges"}`;
+      : `${archData.nodes.length} components · ${archData.edges.length} inferred edges · ${circularSummary(archData)}`;
 
   return (
     <>
@@ -225,15 +224,13 @@ function DashboardBody({
             )}
             <div className="mt-2 flex flex-wrap items-center gap-3 px-1 text-[11px] text-subtle">
               {[
-                ["Frontend", "var(--info)"],
-                ["Gateway / Services", "var(--violet)"],
-                ["Data", "var(--success)"],
-                ["Cache", "var(--cyan)"],
-                ["External", "var(--magenta)"],
-                ["Risk edge", "var(--danger)"],
+                ...(Object.keys(KIND_META) as ModuleKind[]).map(
+                  (k) => [KIND_META[k].label, KIND_META[k].color] as const,
+                ),
+                ["Circular dependency", "var(--danger)"] as const,
               ].map(([label, color]) => (
                 <span key={label} className="flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full" style={{ background: color }} />
+                  <span className="size-2 rounded-[3px]" style={{ background: color }} />
                   {label}
                 </span>
               ))}

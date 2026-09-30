@@ -9,7 +9,7 @@ per-file `APIRouter()` convention (composed under `/api/v1` by `router.py`).
 from __future__ import annotations
 
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -162,9 +162,21 @@ def get_architecture(
     classification = classify_modules(files, api_endpoints)
 
     edges = analysis_read_service.load_dependency_edges(db, current_run.id)
-    circular_pairs = {
-        (e.source_file, e.target_file) for e in analyze_dependency_graph(edges).circular_edges
-    }
+    graph = analyze_dependency_graph(edges)
+    circular_pairs = {(e.source_file, e.target_file) for e in graph.circular_edges}
+
+    # A cycle whose files all sit inside one group produces no group-to-group
+    # edge (`_build_edges` skips same-group pairs), so an edge flag alone would
+    # hide it — e.g. HireSight's 14-file cycle lives entirely in `client/src`.
+    # Count each group's cycle-member files instead, from the same cycles the
+    # Dependencies screen lists (no second detection pass). Cycles are SCCs, so
+    # a file is in at most one.
+    circular_files_by_group: Counter[str] = Counter()
+    for cycle in graph.cycles:
+        for file_path in cycle.files:
+            group_id = classification.file_group_id.get(file_path)
+            if group_id is not None:
+                circular_files_by_group[group_id] += 1
 
     nodes = [
         GraphNode(
@@ -176,6 +188,7 @@ def get_architecture(
             key_files=g.key_files,
             apis=g.apis,
             insight="",
+            circular_files=circular_files_by_group.get(g.id, 0),
         )
         for g in classification.groups
     ]
@@ -187,6 +200,7 @@ def get_architecture(
         analysis_run_id=current_run.id,
         nodes=nodes,
         edges=graph_edges,
+        cycle_count=len(graph.cycles),
     )
 
 

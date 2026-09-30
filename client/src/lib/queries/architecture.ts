@@ -26,6 +26,10 @@ export interface ArchitectureGraphNode {
   key_files: string[];
   apis: string[];
   insight: string;
+  /** How many of this node's files are in a real dependency cycle. Separate
+   * from `ArchitectureGraphEdge.circular` because a cycle entirely *inside*
+   * one node has no inter-node edge to carry a flag. */
+  circular_files: number;
 }
 
 /** `weight` is the number of distinct file-pairs crossing these two
@@ -46,6 +50,17 @@ export interface ArchitectureRead {
   analysis_run_id: string | null;
   nodes: ArchitectureGraphNode[];
   edges: ArchitectureGraphEdge[];
+  /** Same count as `DependenciesRead.circular.length`. */
+  cycle_count: number;
+}
+
+/** "1 circular dependency (14 files)" / "no circular dependencies" — one
+ * phrasing shared by every screen that summarises this, so Architecture,
+ * Overview and Dependencies can't disagree in wording or number. */
+export function circularSummary(data: ArchitectureRead): string {
+  if (data.cycle_count === 0) return "no circular dependencies";
+  const files = data.nodes.reduce((sum, n) => sum + n.circular_files, 0);
+  return `${data.cycle_count} circular ${data.cycle_count === 1 ? "dependency" : "dependencies"} (${files} ${files === 1 ? "file" : "files"})`;
 }
 
 /** `GET /repos/{id}/architecture` — real module nodes/edges derived from
