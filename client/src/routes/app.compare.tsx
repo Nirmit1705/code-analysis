@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { z } from "zod";
 import {
   GitBranch,
   ChevronDown,
@@ -25,7 +26,17 @@ import { completedRuns, useAnalysisRuns, type AnalysisRunRead } from "@/lib/quer
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
+// `base`/`head` deep-link a specific pair of analysis run ids (History's
+// per-row "Compare" link is the producer). Both must be present and resolve
+// to completed runs to take effect; otherwise the default (newest vs. the one
+// before it) applies — a stale/foreign id never blocks the screen.
+const searchSchema = z.object({
+  base: z.coerce.string().optional(),
+  head: z.coerce.string().optional(),
+});
+
 export const Route = createFileRoute("/app/compare")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Compare — CodeLens AI" },
@@ -100,7 +111,6 @@ function RunPickerDropdown({
   return (
     <div
       className="absolute top-[calc(100%+6px)] left-0 z-30 max-h-72 w-full min-w-[280px] overflow-y-auto rounded-lg border border-border-strong bg-popover p-1 shadow-[var(--shadow-pop)]"
-      onMouseDown={(e) => e.stopPropagation()}
     >
       {groupByBranch(runs).map(([branch, branchRuns]) => (
         <div key={branch}>
@@ -148,7 +158,7 @@ function RunPicker({
   const selected = runs.find((r) => r.id === selectedId) ?? null;
 
   return (
-    <div className="relative min-w-[230px] flex-1" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="relative min-w-[230px] flex-1" data-run-picker>
       <p className="label-xs mb-1.5">{label}</p>
       <button
         type="button"
@@ -456,6 +466,7 @@ function Compare() {
   const repositories = useRepositories();
   const runsQuery = useAnalysisRuns(activeRepositoryId);
   const runs = completedRuns(runsQuery.data);
+  const search = Route.useSearch();
 
   const [baseRunId, setBaseRunId] = useState<string | null>(null);
   const [headRunId, setHeadRunId] = useState<string | null>(null);
@@ -468,14 +479,29 @@ function Compare() {
   // restrict Compare to adjacent runs).
   useEffect(() => {
     if (runs.length >= 2 && baseRunId === null && headRunId === null) {
-      setHeadRunId(runs[0]!.id);
-      setBaseRunId(runs[1]!.id);
+      const linkedBase = runs.find((r) => r.id === search.base);
+      const linkedHead = runs.find((r) => r.id === search.head);
+      if (linkedBase && linkedHead) {
+        setBaseRunId(linkedBase.id);
+        setHeadRunId(linkedHead.id);
+      } else {
+        setHeadRunId(runs[0]!.id);
+        setBaseRunId(runs[1]!.id);
+      }
     }
-  }, [runs, baseRunId, headRunId]);
+  }, [runs, baseRunId, headRunId, search.base, search.head]);
 
   useEffect(() => {
     if (!openPicker) return;
-    const close = () => setOpenPicker(null);
+    // Close on an outside press only. The check is on the event target, not a
+    // React `stopPropagation` on the pickers: TanStack Start hydrates the whole
+    // `document`, so React's handlers and this native listener share one node
+    // and stopPropagation can't keep this from firing — it closed the list on
+    // mousedown, unmounting the option before its click ever landed.
+    const close = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest("[data-run-picker]")) return;
+      setOpenPicker(null);
+    };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [openPicker]);
