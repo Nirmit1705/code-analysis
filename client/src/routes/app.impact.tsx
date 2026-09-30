@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { z } from "zod";
 import {
   Target,
   GitBranch,
@@ -19,7 +20,12 @@ import { completedRuns, useAnalysisRuns, type AnalysisRunRead } from "@/lib/quer
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
+const searchSchema = z.object({
+  run: z.coerce.string().optional(),
+});
+
 export const Route = createFileRoute("/app/impact")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Impact Analysis — CodeLens AI" },
@@ -314,14 +320,17 @@ function Impact() {
   const repositories = useRepositories();
   const runsQuery = useAnalysisRuns(activeRepositoryId);
   const runs = completedRuns(runsQuery.data);
+  const search = Route.useSearch();
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
+  // `?run=` deep-links a specific run (History's per-row "Impact" link); an
+  // unknown/stale id falls back to the newest completed run.
   useEffect(() => {
     if (runs.length > 0 && selectedRunId === null) {
-      setSelectedRunId(runs[0]!.id);
+      setSelectedRunId(runs.find((r) => r.id === search.run)?.id ?? runs[0]!.id);
     }
-  }, [runs, selectedRunId]);
+  }, [runs, selectedRunId, search.run]);
 
   const impact = useImpact(activeRepositoryId, selectedRunId);
   const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
