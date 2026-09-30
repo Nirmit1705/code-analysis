@@ -47,12 +47,27 @@ from app.analysis.language_detect import Language  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services import change_narrative_service  # noqa: E402
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus  # noqa: E402
 from app.models.api_endpoint import ApiEndpoint  # noqa: E402
 from app.models.dependency import DependencyEdge as DependencyEdgeRow  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
 from smoke_storage import _clear_previous_runs, _get_or_create_repository, _get_or_create_user  # noqa: E402
+
+
+class _RecordingProvider:
+    """A fake `LLMProvider` that returns a fixed JSON string and records the
+    user message of every call, so a script can assert both what came back
+    and what the model was actually shown."""
+
+    def __init__(self, response_text: str):
+        self._response_text = response_text
+        self.calls: list[str] = []
+
+    def complete(self, *, system: str, messages: list[dict], response_schema: dict | None = None) -> str:
+        self.calls.append(messages[0]["content"])
+        return self._response_text
 
 
 def _check(label: str, condition: bool, detail: str = "") -> bool:
@@ -177,11 +192,22 @@ def run_happy_path() -> bool:
 
         token = create_access_token(subject=user.email)
         client = TestClient(app)
-        resp = client.get(
-            f"/api/v1/repos/{repository.id}/compare",
-            headers=_auth(token),
-            params={"base_run_id": str(base_run.id), "head_run_id": str(head_run.id)},
-        )
+
+        # Phase 9.7: the endpoint now asks the LLM for a narrative. Stub the
+        # provider so this script never touches the real Groq API, and record
+        # what the model was shown.
+        stub = _RecordingProvider('{"explanation": "Stub narrative for the comparison."}')
+        original_provider = change_narrative_service.GroqProvider
+        change_narrative_service.GroqProvider = lambda: stub
+        change_narrative_service.clear_cache()
+        try:
+            resp = client.get(
+                f"/api/v1/repos/{repository.id}/compare",
+                headers=_auth(token),
+                params={"base_run_id": str(base_run.id), "head_run_id": str(head_run.id)},
+            )
+        finally:
+            change_narrative_service.GroqProvider = original_provider
         all_passed = _check("GET -> 200", resp.status_code == 200, resp.text)
         if not all_passed:
             return False
@@ -232,7 +258,17 @@ def run_happy_path() -> bool:
         all_passed &= _check("api_count_delta == 0 (1 - 1)", body["api_count_delta"] == 0, str(body))
         all_passed &= _check("dependency_count_delta == 2 (4 - 2)", body["dependency_count_delta"] == 2, str(body))
         all_passed &= _check("debt_score_delta == 5.0 (15.0 - 10.0)", body["debt_score_delta"] == 5.0, str(body))
-        all_passed &= _check("explanation is None (9.7's job)", body["explanation"] is None, str(body))
+        all_passed &= _check(
+            "explanation is the stubbed narrative, from exactly one LLM call",
+            body["explanation"] == "Stub narrative for the comparison." and len(stub.calls) == 1,
+            f"{body['explanation']!r}, calls={len(stub.calls)}",
+        )
+        prompt = stub.calls[0] if stub.calls else ""
+        all_passed &= _check(
+            "the model was shown the real diff facts (added/removed files, APIs, a new import) and the debt delta",
+            all(s in prompt for s in ("pkgA/new_added.py", "pkgA/old_removed.py", "GET /new", "GET /old", "pkgA/new_added.py imports pkgB/shared.py", "+5.0")),
+            prompt[:400],
+        )
         return all_passed
     finally:
         db.close()

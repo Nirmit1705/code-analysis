@@ -35,7 +35,7 @@ from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.models.repository import Repository
 from app.models.user import User
 from app.schemas.compare import CompareRead, DependencyChangeSchema, FileChangeSchema
-from app.services import analysis_read_service, repo_service
+from app.services import analysis_read_service, change_narrative_service, repo_service
 
 router = APIRouter(tags=["compare"])
 
@@ -92,6 +92,18 @@ def compare_analysis_runs(
         for edge in change_set.removed_edges
     ]
 
+    # Phase 9.7 (design decision #15): best-effort AI narrative over the facts
+    # above. Never raises, and `None` (no LLM call at all) for an empty diff,
+    # so it can't fail or change anything else in this response.
+    explanation = change_narrative_service.generate_change_explanation(
+        change_narrative_service.build_change_facts(
+            base_ref=f"{base_run.branch}@{base_run.commit_sha[:7]}",
+            head_ref=f"{head_run.branch}@{head_run.commit_sha[:7]}",
+            change_set=change_set,
+            debt_score_delta=head_run.debt_score - base_run.debt_score,
+        )
+    )
+
     return CompareRead(
         base_run_id=base_run.id,
         head_run_id=head_run.id,
@@ -109,7 +121,7 @@ def compare_analysis_runs(
         api_count_delta=head_run.api_count - base_run.api_count,
         dependency_count_delta=head_run.dependency_count - base_run.dependency_count,
         debt_score_delta=head_run.debt_score - base_run.debt_score,
-        explanation=None,
+        explanation=explanation,
     )
 
 

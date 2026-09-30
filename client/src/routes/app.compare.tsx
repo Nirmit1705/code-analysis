@@ -450,7 +450,11 @@ function CompareResult({
         </>
       )}
 
-      <AiNote>{data.explanation ?? "No AI explanation available for this comparison."}</AiNote>
+      {/* Identical runs get no narrative by design (nothing to explain), and the
+          panel above already says so — so no "unavailable" note there. */}
+      {hasChanges ? (
+        <AiNote>{data.explanation ?? "No AI explanation available for this comparison."}</AiNote>
+      ) : null}
 
       <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-3 text-center text-[11.5px] text-subtle">
         Diffed from two already-completed analysis runs &mdash; not a live git patch. Dependency risk

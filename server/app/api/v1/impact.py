@@ -27,7 +27,7 @@ from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.models.repository import Repository
 from app.models.user import User
 from app.schemas.impact import ImpactedFileSchema, ImpactRead, ScoreBreakdownSchema
-from app.services import analysis_read_service, impact_service, repo_service
+from app.services import analysis_read_service, change_narrative_service, impact_service, repo_service
 
 router = APIRouter(tags=["impact"])
 
@@ -89,6 +89,18 @@ def get_impact(
         change_kind=classify_change(change_set),
     )
 
+    # Phase 9.7 (design decision #15): best-effort AI narrative over the diff
+    # and the computed impact. Never raises; `None` for an empty diff.
+    explanation = change_narrative_service.generate_change_explanation(
+        change_narrative_service.build_change_facts(
+            base_ref=f"{previous_run.branch}@{previous_run.commit_sha[:7]}",
+            head_ref=f"{head_run.branch}@{head_run.commit_sha[:7]}",
+            change_set=change_set,
+            debt_score_delta=head_run.debt_score - previous_run.debt_score,
+            impact=result,
+        )
+    )
+
     return ImpactRead(
         analysis_run_id=head_run.id,
         previous_analysis_run_id=previous_run.id,
@@ -107,5 +119,5 @@ def get_impact(
             multiplier=result.breakdown.multiplier,
             excluded_test_files=result.breakdown.excluded_test_files,
         ),
-        explanation=None,
+        explanation=explanation,
     )

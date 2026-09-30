@@ -220,6 +220,110 @@ def build_file_insight_prompt(file_path: str, chunks: list[FileChunkSummary]) ->
     return system, messages, _FILE_INSIGHT_RESPONSE_SCHEMA
 
 
+# --- Change narrative (Phase 9.7) -------------------------------------------------
+
+
+class ImpactSummary(Protocol):
+    """Duck-typed view of `impact_service.ImpactResult`, already flattened to
+    plain strings/ints by `change_narrative_service.py` (which owns capping
+    the file lists) — this module only formats."""
+
+    risk: str
+    score: int
+    change_kind: str
+    direct_files: list[str]
+    indirect_files: list[str]
+    affected_apis: list[str]
+    excluded_test_files: int
+
+
+class ChangeExplanationInput(Protocol):
+    """Everything the change-narrative prompt is allowed to know: the
+    already-computed, file-grain facts from `analysis/change.py`'s
+    `ChangeSet` (and, from Impact, `impact_service`'s result) — never a raw
+    diff patch or any file content. Lists are pre-capped by the caller; an
+    over-long list already ends in a `"(+N more)"` entry."""
+
+    base_ref: str
+    head_ref: str
+    added_files: list[str]
+    removed_files: list[str]
+    modified_files: list[str]
+    added_symbols: list[str]
+    removed_symbols: list[str]
+    added_apis: list[str]
+    removed_apis: list[str]
+    dependency_changes: list[str]
+    debt_score_delta: float
+    impact: ImpactSummary | None
+
+
+_CHANGE_TASK_INSTRUCTION = (
+    "You are explaining a code change to a developer who is reviewing it. "
+    "Below are structured facts comparing two analyzed states of a "
+    "repository: which files, symbols, API endpoints and dependency edges "
+    "differ, and, when present, the downstream impact computed by "
+    "dependency analysis. Write 2 to 4 short sentences of plain prose "
+    "(no markdown, no bullet points, no headings) saying what changed and "
+    "what it means for the rest of the codebase. Use only the facts given. "
+    "Do not guess why the change was made and do not describe code you were "
+    "not shown: a 'modified' file only means its symbols or line count "
+    "differ. Never say that something is unaffected, safe, low risk or "
+    "non-breaking unless the facts say so: absence of information is not "
+    "evidence. In particular, when no downstream impact section is given, "
+    "say nothing about what else the change affects or whether it breaks "
+    "anything. Leave out any section that has no entries. If impact data is "
+    "given, explain the risk level through how many files depend on the "
+    "change and whether it is breaking, and never contradict it. If nothing "
+    "changed, say that plainly."
+)
+
+_CHANGE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"explanation": {"type": "string"}},
+    "required": ["explanation"],
+    "additionalProperties": False,
+}
+
+
+def build_change_explanation_prompt(facts: ChangeExplanationInput) -> tuple[str, list[dict], dict]:
+    """Builds the Compare/Impact narrative prompt. Same shared grounding
+    preamble as every other Phase 8 prompt; the user message is a short,
+    pre-digested fact list, matching `build_insights_prompt`'s precedent of
+    feeding the model structured facts rather than raw data. This function
+    only formats; it never queries anything."""
+
+    def section(title: str, items: list[str]) -> list[str]:
+        return [f"\n{title}:", *(f"- {item}" for item in items)] if items else [f"\n{title}: none"]
+
+    lines: list[str] = [f"Comparison: {facts.base_ref} -> {facts.head_ref}"]
+    lines += section("Files added", facts.added_files)
+    lines += section("Files removed", facts.removed_files)
+    lines += section("Files modified", facts.modified_files)
+    lines += section("Symbols added", facts.added_symbols)
+    lines += section("Symbols removed", facts.removed_symbols)
+    lines += section("API endpoints added", facts.added_apis)
+    lines += section("API endpoints removed", facts.removed_apis)
+    lines += section("Dependency changes", facts.dependency_changes)
+    lines.append(f"\nTechnical debt score change: {facts.debt_score_delta:+.1f}")
+
+    if facts.impact is not None:
+        impact = facts.impact
+        lines.append(
+            f"\nDownstream impact (from dependency analysis): risk {impact.risk}, "
+            f"score {impact.score}/100, change type {impact.change_kind}"
+        )
+        lines += section("Files that directly import a changed file", impact.direct_files)
+        lines += section("Files that depend on a changed file indirectly", impact.indirect_files)
+        lines += section("API endpoints defined in affected files", impact.affected_apis)
+        if impact.excluded_test_files:
+            lines.append(f"\n{impact.excluded_test_files} test file(s) are also reached but do not count toward the score")
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_CHANGE_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": "Change facts:\n" + "\n".join(lines)}]
+    return system, messages, _CHANGE_RESPONSE_SCHEMA
+
+
 def build_insights_prompt(
     top_debt_issues: list[DebtIssueSummary],
     coupling_summary: list[CouplingSummary],
