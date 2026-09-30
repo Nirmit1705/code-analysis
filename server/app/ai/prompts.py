@@ -220,6 +220,84 @@ def build_file_insight_prompt(file_path: str, chunks: list[FileChunkSummary]) ->
     return system, messages, _FILE_INSIGHT_RESPONSE_SCHEMA
 
 
+# --- Architecture component insight ---------------------------------------------
+
+
+class ComponentInsightInput(Protocol):
+    """Everything the component-insight prompt is allowed to know about one
+    Architecture node — facts already derived by the Architecture screen's
+    own pipeline (module classification, file-grain dependency edges, cycle
+    detection, persisted debt issues), never file content. Lists are
+    pre-capped by the caller (`component_insight_service.py`)."""
+
+    label: str
+    kind: str
+    is_external: bool
+    files: int
+    loc: int
+    key_files: list[str]
+    apis: list[str]
+    depends_on: list[str]
+    used_by: list[str]
+    circular_files: int
+    circular_with: list[str]
+    debt_issues: list[str]
+
+
+_COMPONENT_TASK_INSTRUCTION = (
+    "You are explaining one component of a software system to a developer "
+    "who is new to it. Below are structured facts about that component: what "
+    "kind it is, how large, its main files and API endpoints, which other "
+    "components it depends on, which components depend on it, and any "
+    "circular dependencies or technical-debt findings recorded for it. Write "
+    "2 to 4 short sentences of plain prose (no markdown, no bullet points, "
+    "no headings) saying what role this component plays in the system and "
+    "what a developer should be careful about when changing it. Use only the "
+    "facts given. Infer a role only from the names, kind and relationships "
+    "shown, and say so plainly when that is all you have; never describe "
+    "code you were not shown. Never say a component is healthy, well "
+    "designed, safe or low risk unless the facts say so: absence of "
+    "information is not evidence. Mention a circular dependency or debt "
+    "finding only if one is listed. If other components depend on it, say "
+    "that changes here can affect them."
+)
+
+_COMPONENT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"insight": {"type": "string"}},
+    "required": ["insight"],
+    "additionalProperties": False,
+}
+
+
+def build_component_insight_prompt(facts: ComponentInsightInput) -> tuple[str, list[dict], dict]:
+    """Builds the per-component insight prompt. Same shared grounding
+    preamble as every other prompt here; formats only, never queries."""
+
+    def section(title: str, items: list[str]) -> list[str]:
+        return [f"\n{title}:", *(f"- {item}" for item in items)] if items else [f"\n{title}: none"]
+
+    kind = f"{facts.kind} (an external service this repository imports, not code in it)" if facts.is_external else facts.kind
+    lines: list[str] = [f"Component: {facts.label}", f"Kind: {kind}"]
+    if not facts.is_external:
+        lines.append(f"Size: {facts.files} files, {facts.loc} lines of code")
+    lines += section("Main files", facts.key_files)
+    lines += section("API endpoints defined here", facts.apis)
+    lines += section("Depends on (imports from)", facts.depends_on)
+    lines += section("Used by (imported by)", facts.used_by)
+    if facts.circular_files:
+        lines.append(f"\nCircular dependency: {facts.circular_files} of this component's files are in a cycle")
+        if facts.circular_with:
+            lines.append("The cycle also reaches: " + ", ".join(facts.circular_with))
+    else:
+        lines.append("\nCircular dependency: none recorded")
+    lines += section("Technical debt findings recorded for this component", facts.debt_issues)
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_COMPONENT_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": "Component facts:\n" + "\n".join(lines)}]
+    return system, messages, _COMPONENT_RESPONSE_SCHEMA
+
+
 # --- Change narrative (Phase 9.7) -------------------------------------------------
 
 

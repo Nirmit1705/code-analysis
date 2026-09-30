@@ -3,10 +3,14 @@ import { useState } from "react";
 import { Search, Layers, X } from "lucide-react";
 
 import { ArchGraph, KIND_META, nodeById, type ModuleKind } from "@/components/arch-graph";
-import { Panel, PanelHeader, Tag } from "@/components/ui-kit";
+import { AiNote, Panel, PanelHeader, Tag } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
 import { toArchGraphEdges } from "@/lib/graph-layout";
-import { circularSummary, useArchitecture } from "@/lib/queries/architecture";
+import {
+  circularSummary,
+  useArchitecture,
+  useComponentInsight,
+} from "@/lib/queries/architecture";
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +51,14 @@ function Architecture() {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<ModuleKind[]>([]);
   const [group, setGroup] = useState<"service" | "module">("service");
+
+  // Generated on demand, only once a component is selected (see
+  // `component_insight_service`); repeats are served from the backend cache.
+  const insight = useComponentInsight(
+    activeRepositoryId,
+    architecture.data?.analysis_run_id ?? null,
+    selected,
+  );
 
   const data = architecture.data;
   // `ArchGraph` lays itself out; these are the plain backend nodes.
@@ -283,9 +295,29 @@ function Architecture() {
                     </div>
                   ) : null}
 
-                  <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-3 text-center text-[11.5px] text-subtle">
-                    AI-generated insights will appear here once the assistant is wired up.
-                  </p>
+                  {insight.isLoading ? (
+                    <div
+                      className="rounded-md border border-violet/22 bg-violet/[0.07] p-3"
+                      aria-busy="true"
+                    >
+                      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-violet-soft uppercase">
+                        <span className="pulse-node inline-block size-1.5 rounded-full bg-violet" />
+                        AI insight
+                      </p>
+                      <div className="flex flex-col gap-2" aria-hidden>
+                        {["w-[94%]", "w-[82%]", "w-[60%]"].map((w) => (
+                          <span
+                            key={w}
+                            className={cn("h-3 animate-pulse rounded-md bg-surface-3", w)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <AiNote>
+                      {insight.data?.insight ?? "No AI insight available for this component."}
+                    </AiNote>
+                  )}
                 </div>
               </Panel>
             ) : (

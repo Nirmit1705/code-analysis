@@ -29,16 +29,14 @@ per-request GET rather than once per analysis:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
-import threading
-from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from app.ai.prompts import build_change_explanation_prompt
 from app.ai.provider import GroqProvider, LLMProvider, LLMProviderError
+from app.ai.text_cache import PromptCache
 from app.analysis.change import ChangeSet
 from app.analysis.dependencies import DependencyEdge, DependencyEdgeType
 from app.services.impact_service import ImpactResult
@@ -49,7 +47,6 @@ logger = logging.getLogger(__name__)
 # constant introduced across Phases 7-9. They only bound prompt size.
 _MAX_LIST_ITEMS = 12
 _MAX_EXPLANATION_CHARS = 1500
-_CACHE_MAX_ENTRIES = 256
 
 # The model sometimes writes narrow/no-break/thin spaces where it means a
 # normal one (seen live in the assistant's answers); normalized out here too.
@@ -154,31 +151,13 @@ def build_change_facts(
     )
 
 
-# Process-local LRU of prompt-hash -> explanation. See the module docstring.
-_cache: OrderedDict[str, str] = OrderedDict()
-_cache_lock = threading.Lock()
-
-
-def _cache_get(key: str) -> str | None:
-    with _cache_lock:
-        value = _cache.get(key)
-        if value is not None:
-            _cache.move_to_end(key)
-        return value
-
-
-def _cache_put(key: str, value: str) -> None:
-    with _cache_lock:
-        _cache[key] = value
-        _cache.move_to_end(key)
-        while len(_cache) > _CACHE_MAX_ENTRIES:
-            _cache.popitem(last=False)
+# Shared bounded LRU (see `app/ai/text_cache.py`) — keyed by the exact prompt.
+_cache = PromptCache()
 
 
 def clear_cache() -> None:
     """For tests."""
-    with _cache_lock:
-        _cache.clear()
+    _cache.clear()
 
 
 def generate_change_explanation(facts: ChangeFacts, provider: LLMProvider | None = None) -> str | None:
@@ -188,8 +167,8 @@ def generate_change_explanation(facts: ChangeFacts, provider: LLMProvider | None
 
     try:
         system, messages, response_schema = build_change_explanation_prompt(facts)
-        cache_key = hashlib.sha256(json.dumps([system, messages], sort_keys=True).encode()).hexdigest()
-        cached = _cache_get(cache_key)
+        cache_key = PromptCache.key_for(system, messages)
+        cached = _cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -197,7 +176,7 @@ def generate_change_explanation(facts: ChangeFacts, provider: LLMProvider | None
         raw = llm.complete(system=system, messages=messages, response_schema=response_schema)
         explanation = _parse_explanation(raw)
         if explanation is not None:
-            _cache_put(cache_key, explanation)
+            _cache.put(cache_key, explanation)
         return explanation
     except LLMProviderError:
         logger.warning("change_narrative_service: LLM call failed for %s -> %s", facts.base_ref, facts.head_ref)

@@ -106,7 +106,7 @@ from app.models.api_endpoint import ApiEndpoint  # noqa: E402
 from app.models.file import File  # noqa: E402
 from app.models.repository import Repository  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.services import analysis_read_service  # noqa: E402
+from app.services import analysis_read_service, component_insight_service  # noqa: E402
 from app.services.module_classification import MAX_MODULE_GROUPS, ModuleKind, classify_modules  # noqa: E402
 from app.services.repo_service import (  # noqa: E402
     create_queued_analysis_run,
@@ -585,6 +585,94 @@ def run_architecture_same_group_cycle() -> bool:
         db.close()
 
 
+# --- group 5c: per-component AI insight (GET /architecture/insight) -----------------
+
+
+class _InsightStub:
+    """A fake `LLMProvider` returning a fixed string and recording the user
+    message of every call (what the model was actually shown)."""
+
+    def __init__(self, response: str):
+        self._response = response
+        self.calls: list[str] = []
+
+    def complete(self, *, system: str, messages: list[dict], response_schema: dict | None = None) -> str:
+        self.calls.append(messages[0]["content"])
+        return self._response
+
+
+def run_component_insight() -> bool:
+    print("\n=== group 5c: GET /architecture/insight — grounded prompt, cache, 404s, graceful None ===")
+    db = SessionLocal()
+    try:
+        owner = _get_or_create_user(db, "smoke-api-arch-insight@local.test")
+        other = _get_or_create_user(db, "smoke-api-arch-insight-other@local.test")
+        repository = _get_or_create_repository(
+            db, owner, github_repo_id="smoke-api-arch-insight", owner="smoke-api", name="insight"
+        )
+        _persist_cyclic_fixture(db, repository)
+
+        token = create_access_token(subject=owner.email)
+        client = TestClient(app)
+        url = f"/api/v1/repos/{repository.id}/architecture/insight"
+
+        original = component_insight_service.GroqProvider
+        stub = _InsightStub('{"insight": "Stub insight for module_a."}')
+        component_insight_service.GroqProvider = lambda: stub
+        component_insight_service.clear_cache()
+        try:
+            resp = client.get(url, headers=_auth(token), params={"node_id": "cyclic/module_a"})
+            all_passed = _check("GET -> 200", resp.status_code == 200, resp.text)
+            if not all_passed:
+                return False
+            body = resp.json()
+            all_passed &= _check(
+                "the stubbed insight comes back, tagged with the node id, from exactly one call",
+                body == {"node_id": "cyclic/module_a", "insight": "Stub insight for module_a."} and len(stub.calls) == 1,
+                f"{body}, calls={len(stub.calls)}",
+            )
+            prompt = stub.calls[0] if stub.calls else ""
+            all_passed &= _check(
+                "the model was shown the component, what it depends on / is used by (with import counts) and its cycle",
+                all(
+                    p in prompt
+                    for p in (
+                        "Component: cyclic/module_a",
+                        "Depends on (imports from):\n- cyclic/module_b (1 import)",
+                        "Used by (imported by):\n- cyclic/module_b (1 import)\n- cyclic/module_c (1 import)",
+                        "Circular dependency: 1 of this component's files are in a cycle",
+                        "The cycle also reaches: cyclic/module_b",
+                    )
+                ),
+                prompt,
+            )
+
+            client.get(url, headers=_auth(token), params={"node_id": "cyclic/module_a"})
+            all_passed &= _check(
+                "a repeat request is served from the cache (still one provider call)", len(stub.calls) == 1, f"calls={len(stub.calls)}"
+            )
+
+            resp = client.get(url, headers=_auth(token), params={"node_id": "no/such/component"})
+            all_passed &= _check("an unknown node id -> 404", resp.status_code == 404, resp.text)
+            resp = client.get(url, headers=_auth(create_access_token(subject=other.email)), params={"node_id": "cyclic/module_a"})
+            all_passed &= _check("another user's token -> 404", resp.status_code == 404, resp.text)
+
+            # A model failure is a calm `null`, never an error for the screen.
+            component_insight_service.clear_cache()
+            component_insight_service.GroqProvider = lambda: _InsightStub("this is not json")
+            resp = client.get(url, headers=_auth(token), params={"node_id": "cyclic/module_b"})
+            all_passed &= _check(
+                "unusable model output -> 200 with insight null",
+                resp.status_code == 200 and resp.json() == {"node_id": "cyclic/module_b", "insight": None},
+                resp.text,
+            )
+        finally:
+            component_insight_service.GroqProvider = original
+        return all_passed
+    finally:
+        db.close()
+
+
 # --- group 6: real component layering (the core regression test) ------------------
 
 
@@ -810,6 +898,7 @@ def main() -> int:
     r4 = run_load_dependency_edges_roundtrip()
     r5 = run_architecture_cyclic_fixture()
     r5b = run_architecture_same_group_cycle()
+    r5c = run_component_insight()
     r6 = run_architecture_layering()
     r7 = run_real_repo_dogfood()
     r8 = run_live_bonus()
@@ -821,10 +910,11 @@ def main() -> int:
     print(f"4. load_dependency_edges:       {'PASS' if r4 else 'FAIL'}")
     print(f"5. Architecture (cyclic fixture): {'PASS' if r5 else 'FAIL'}")
     print(f"5b. Same-node cycle surfaced:    {'PASS' if r5b else 'FAIL'}")
+    print(f"5c. Component AI insight:         {'PASS' if r5c else 'FAIL'}")
     print(f"6. Architecture layering (core fix): {'PASS' if r6 else 'FAIL'}")
     print(f"7. Real repo dogfood (secondary): {'PASS' if r7 else 'FAIL'}")
     print(f"8. Live bonus (non-gating):     {'PASS' if r8 else 'FAIL (see above)'}")
-    return 0 if (r1 and r2 and r3 and r4 and r5 and r5b and r6 and r7) else 1
+    return 0 if (r1 and r2 and r3 and r4 and r5 and r5b and r5c and r6 and r7) else 1
 
 
 if __name__ == "__main__":

@@ -12,8 +12,10 @@ calls out explicitly:
   one — inventing a number here would be exactly the kind of fabricated
   signal the `insight: ""` rule below already forbids for text. Revisit
   only if a future phase actually specifies a real per-module formula.
-- `insight` is always `""` — no fake per-node AI text, same rule as
-  `DashboardRead.ai_insights` (Phase 6.3).
+- `GraphNode.insight` is always `""` — never fake per-node AI text (same rule as
+  `DashboardRead.ai_insights`, Phase 6.3). The real per-component AI insight is
+  generated on demand by a separate endpoint (`GET .../architecture/insight`,
+  `ComponentInsightRead` below) rather than for every node on every read.
 """
 
 import uuid
@@ -70,3 +72,13 @@ class ArchitectureRead(BaseModel):
     # Number of dependency cycles in the run — the same count as the length of
     # `DependenciesRead.circular`, so the two screens can quote one number.
     cycle_count: int = 0
+
+
+class ComponentInsightRead(BaseModel):
+    """`GET /repos/{id}/architecture/insight?node_id=...` — an AI insight for one
+    component, generated on demand. `insight` is `None` when the model call
+    failed or returned nothing usable (the screen shows a calm "not available"
+    line); it is never a fabricated placeholder."""
+
+    node_id: str
+    insight: str | None = None

@@ -16,7 +16,8 @@ export type { ModuleKind };
  * per-module health formula was ever specified, unlike Dashboard's fully
  * specified one — see `server/app/schemas/architecture.py`'s own
  * docstring for why that's a deliberate omission, not a gap). `insight` is
- * always `""` until Phase 8 exists to generate real per-node text. */
+ * always `""` — the real per-component AI text comes from `useComponentInsight`
+ * below, on demand, not from this field. */
 export interface ArchitectureGraphNode {
   id: string;
   label: string;
@@ -61,6 +62,36 @@ export function circularSummary(data: ArchitectureRead): string {
   if (data.cycle_count === 0) return "no circular dependencies";
   const files = data.nodes.reduce((sum, n) => sum + n.circular_files, 0);
   return `${data.cycle_count} circular ${data.cycle_count === 1 ? "dependency" : "dependencies"} (${files} ${files === 1 ? "file" : "files"})`;
+}
+
+/** Mirrors `ComponentInsightRead`. `insight` is `null` when the model call
+ * failed or returned nothing usable — the panel then says so instead of
+ * showing anything made up. */
+export interface ComponentInsightRead {
+  node_id: string;
+  insight: string | null;
+}
+
+/** `GET /repos/{id}/architecture/insight?node_id=...` — an AI insight for one
+ * component, generated on demand (the backend caches repeats), so this only
+ * fires once a node is actually selected. The analysis run id is part of the
+ * key so a re-analysis refreshes it. Kept fresh for a long time: the text only
+ * changes when the underlying analysis does. */
+export function useComponentInsight(
+  repositoryId: string | null,
+  analysisRunId: string | null,
+  nodeId: string | null,
+) {
+  return useQuery({
+    queryKey: ["architecture-insight", repositoryId, analysisRunId, nodeId],
+    queryFn: () =>
+      apiFetch<ComponentInsightRead>(
+        `/repos/${repositoryId}/architecture/insight?node_id=${encodeURIComponent(nodeId ?? "")}`,
+      ),
+    enabled: repositoryId !== null && analysisRunId !== null && nodeId !== null,
+    retry: false,
+    staleTime: 30 * 60_000,
+  });
 }
 
 /** `GET /repos/{id}/architecture` — real module nodes/edges derived from

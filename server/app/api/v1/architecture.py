@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -19,12 +20,19 @@ from app.analysis.dependencies import DependencyEdge as PureDependencyEdge
 from app.analysis.dependencies import DependencyEdgeType
 from app.analysis.graph import analyze_dependency_graph
 from app.api.deps import get_current_user, get_db
+from app.models.analysis_run import AnalysisRun
 from app.models.api_endpoint import ApiEndpoint
 from app.models.file import File
 from app.models.repository import Repository
 from app.models.user import User
-from app.schemas.architecture import ArchitectureRead, GraphEdge, GraphNode, ModuleKindLiteral
-from app.services import analysis_read_service, repo_service
+from app.schemas.architecture import (
+    ArchitectureRead,
+    ComponentInsightRead,
+    GraphEdge,
+    GraphNode,
+    ModuleKindLiteral,
+)
+from app.services import analysis_read_service, component_insight_service, repo_service
 from app.services.module_classification import ModuleClassification, classify_modules
 
 router = APIRouter(tags=["architecture"])
@@ -140,6 +148,20 @@ def _repository_or_404(db: Session, repository_id: uuid.UUID, current_user: User
     return repository
 
 
+@dataclass
+class _Architecture:
+    """Everything `get_architecture` derives for one run, kept together so the
+    per-component insight endpoint is computed from exactly what the screen
+    shows — not a second, possibly different, derivation."""
+
+    run: AnalysisRun
+    files: list[File]
+    classification: ModuleClassification
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    cycle_count: int
+
+
 @router.get("/repos/{repository_id}/architecture", response_model=ArchitectureRead)
 def get_architecture(
     repository_id: uuid.UUID,
@@ -150,10 +172,54 @@ def get_architecture(
     repository has never completed an analysis, matching `DashboardRead`'s
     own convention."""
     repository = _repository_or_404(db, repository_id, current_user)
+    built = _build_architecture(db, repository)
+    if built is None:
+        return ArchitectureRead(analyzed=False)
+    return ArchitectureRead(
+        analyzed=True,
+        analysis_run_id=built.run.id,
+        nodes=built.nodes,
+        edges=built.edges,
+        cycle_count=built.cycle_count,
+    )
 
+
+@router.get("/repos/{repository_id}/architecture/insight", response_model=ComponentInsightRead)
+def get_component_insight(
+    repository_id: uuid.UUID,
+    node_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ComponentInsightRead:
+    """An AI insight for one Architecture component, generated on demand when
+    its node is clicked (see `component_insight_service`). `insight` is `None`
+    when the model call failed or returned nothing usable — never an error, so
+    the detail panel degrades to a calm "not available" line. 404 only when the
+    repository is not the caller's, or `node_id` is not a component of the
+    latest analysis."""
+    repository = _repository_or_404(db, repository_id, current_user)
+    built = _build_architecture(db, repository)
+    node = next((n for n in built.nodes if n.id == node_id), None) if built is not None else None
+    if built is None or node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Component not found")
+
+    facts = component_insight_service.build_component_facts(
+        db,
+        node=node,
+        nodes=built.nodes,
+        edges=built.edges,
+        classification=built.classification,
+        files=built.files,
+        analysis_run_id=built.run.id,
+    )
+    return ComponentInsightRead(node_id=node.id, insight=component_insight_service.generate_component_insight(facts))
+
+
+def _build_architecture(db: Session, repository: Repository) -> _Architecture | None:
+    """`None` when the repository has never completed an analysis."""
     current_run = analysis_read_service.get_latest_completed_run(db, repository.id)
     if current_run is None:
-        return ArchitectureRead(analyzed=False)
+        return None
 
     files = db.execute(select(File).where(File.analysis_run_id == current_run.id)).scalars().all()
     api_endpoints = db.execute(
@@ -195,9 +261,10 @@ def get_architecture(
     graph_edges, external_nodes = _build_edges(edges, classification, circular_pairs, current_run.database_provider)
     nodes.extend(external_nodes)
 
-    return ArchitectureRead(
-        analyzed=True,
-        analysis_run_id=current_run.id,
+    return _Architecture(
+        run=current_run,
+        files=list(files),
+        classification=classification,
         nodes=nodes,
         edges=graph_edges,
         cycle_count=len(graph.cycles),
