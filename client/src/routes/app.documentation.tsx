@@ -3,7 +3,7 @@ import { useState } from "react";
 import { BookOpen, Download, RefreshCcw } from "lucide-react";
 
 import { AiNote, Panel, PanelHeader, Tag } from "@/components/ui-kit";
-import { cn } from "@/lib/utils";
+import { capitalizeFirst, cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/documentation")({
   head: () => ({
@@ -151,7 +151,7 @@ function Documentation() {
           <PanelHeader
             title={sections.find((s) => s.id === active)!.title}
             subtitle={doc.source}
-            actions={<Tag tone="violet">{doc.updated}</Tag>}
+            actions={<Tag tone="violet">{capitalizeFirst(doc.updated)}</Tag>}
           />
           <article className="max-w-3xl space-y-4 p-5">
             {doc.blocks.map((b, i) => (

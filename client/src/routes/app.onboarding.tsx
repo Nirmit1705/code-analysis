@@ -75,7 +75,7 @@ function OnboardingPath() {
             Generated from the dependency graph — ordered by what depends on what.
           </p>
         </div>
-        <Tag tone="violet" className="ml-auto">est. 5h total</Tag>
+        <Tag tone="violet" className="ml-auto">Est. 5h total</Tag>
       </div>
 
       <Panel ambient>

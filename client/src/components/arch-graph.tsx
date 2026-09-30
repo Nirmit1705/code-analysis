@@ -597,19 +597,19 @@ export function ArchGraph({
                 <path d="M0,4 H16" stroke={EDGE_NEUTRAL} strokeWidth="1.6" opacity="0.85" />
                 <path d="M15,0.6 L23,4 L15,7.4 Z" fill={EDGE_NEUTRAL} opacity="0.85" />
               </svg>
-              depends on
+              Depends on
             </span>
             <span className="flex items-center gap-1.5">
               <svg width="24" height="8" aria-hidden>
                 <path d="M0,4 H24" stroke={EDGE_NEUTRAL} strokeWidth="3.4" opacity="0.85" />
               </svg>
-              thicker = more imports
+              Thicker = more imports
             </span>
             <span className="flex items-center gap-1.5">
               <svg width="24" height="8" aria-hidden>
                 <path d="M0,4 H24" stroke={EDGE_RISK} strokeWidth="1.8" strokeDasharray="4 3" />
               </svg>
-              circular
+              Circular
             </span>
           </div>
           <p className="text-[11px] text-subtle">

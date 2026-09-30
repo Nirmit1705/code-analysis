@@ -63,7 +63,7 @@ function Debt() {
 
       <div className="grid gap-3 lg:grid-cols-[260px_1fr] 2xl:grid-cols-[260px_1fr_290px]">
         <Panel ambient className="h-fit">
-          <PanelHeader title="Debt score" subtitle="lower is better" icon={<AlertTriangle className="size-3.5" />} />
+          <PanelHeader title="Debt score" subtitle="Lower is better" icon={<AlertTriangle className="size-3.5" />} />
           <div className="flex flex-col items-center gap-3 p-5">
             <Ring value={28} size={92} tone="warning" label="28" />
             <p className="text-center text-[11.5px] text-muted-foreground">
@@ -87,7 +87,7 @@ function Debt() {
                   onClick={() => setOpen(isOpen ? null : i.id)}
                   className="focus-ring flex w-full items-center gap-3 px-4 py-3 text-left"
                 >
-                  <Tag tone={severityTone(i.severity)}>{i.severity}</Tag>
+                  <Tag tone={severityTone(i.severity)} caps>{i.severity}</Tag>
                   <span className="font-mono text-[11px] text-subtle">{i.id}</span>
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{i.title}</span>
                   <Tag>{i.category}</Tag>

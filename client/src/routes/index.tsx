@@ -218,7 +218,7 @@ function ProductPreview() {
                       <li key={c.sha} className="flex items-center gap-2 px-3 py-2">
                         <span className="font-mono text-[11px] text-violet-soft">{c.sha}</span>
                         <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">{c.message}</span>
-                        <Tag tone={c.impact === "high" ? "danger" : c.impact === "medium" ? "warning" : "success"}>
+                        <Tag caps tone={c.impact === "high" ? "danger" : c.impact === "medium" ? "warning" : "success"}>
                           {c.impact}
                         </Tag>
                       </li>
@@ -300,7 +300,7 @@ function Landing() {
               </Link>
             </div>
             <p className="mt-5 font-mono text-[12px] text-subtle">
-              read-only access · no code stored · analysis in ~4 minutes
+              Read-only access · no code stored · analysis in ~4 minutes
             </p>
           </div>
 
@@ -373,7 +373,7 @@ function Landing() {
 
           <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
             <Panel className="overflow-hidden">
-              <PanelHeader title="AI Codebase Assistant" subtitle="grounded in 3,184 indexed files" icon={<Sparkles className="size-3.5" />} />
+              <PanelHeader title="AI Codebase Assistant" subtitle="Grounded in 3,184 indexed files" icon={<Sparkles className="size-3.5" />} />
               <div className="space-y-3 p-4">
                 <p className="ml-auto w-fit rounded-md rounded-br-sm border border-border bg-surface-2 px-3 py-2 text-[12.5px]">
                   How does authentication work?

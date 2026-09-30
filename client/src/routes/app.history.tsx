@@ -250,7 +250,7 @@ function HistoryPage() {
               <StatCell
                 label="Median duration"
                 value={medianMs === null ? "—" : formatDuration(medianMs)}
-                sub="queued to completed"
+                sub="Queued to completed"
               />
             </div>
             <div className="bg-surface">
@@ -275,7 +275,7 @@ function HistoryPage() {
             <Panel>
               <PanelHeader
                 title="Recent runs"
-                subtitle="newest first"
+                subtitle="Newest first"
                 icon={<History className="size-3.5" />}
               />
               <div className="overflow-x-auto">
@@ -309,7 +309,7 @@ function HistoryPage() {
                         <tr key={r.id} className="hover:bg-surface-2/60">
                           <td className="px-4 py-2.5">
                             <span title={r.error_message ?? undefined}>
-                              <Tag tone={st.tone}>{st.label}</Tag>
+                              <Tag tone={st.tone} caps>{st.label}</Tag>
                             </span>
                           </td>
                           <td className="px-4 py-2.5">
@@ -392,7 +392,7 @@ function HistoryPage() {
             <Panel>
               <PanelHeader
                 title="Debt score trend"
-                subtitle={trendBranch ? `completed runs on ${trendBranch}` : "completed runs"}
+                subtitle={trendBranch ? `Completed runs on ${trendBranch}` : "Completed runs"}
               />
               <div className="space-y-3 p-4">
                 {series.length >= 2 ? (

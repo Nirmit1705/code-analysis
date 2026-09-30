@@ -106,7 +106,7 @@ function ApiReference() {
               </ul>
             </Panel>
             <Panel>
-              <PanelHeader title="Called from" subtitle="frontend and internal callers" />
+              <PanelHeader title="Called from" subtitle="Frontend and internal callers" />
               <ul className="divide-y divide-border">
                 {ep.usedBy.map((f) => (
                   <li key={f} className="px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{f}</li>

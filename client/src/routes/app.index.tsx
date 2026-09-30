@@ -7,6 +7,7 @@ import { ArchGraph, KIND_META, type ModuleKind } from "@/components/arch-graph";
 import { Panel, PanelHeader, Ring, StatCell, Tag, toneColor } from "@/components/ui-kit";
 import { useActiveRepositoryId } from "@/lib/active-repo";
 import { toArchGraphEdges } from "@/lib/graph-layout";
+import { capitalizeFirst } from "@/lib/utils";
 import { circularSummary, useArchitecture, type ArchitectureRead } from "@/lib/queries/architecture";
 import { useDashboard, type DashboardRead } from "@/lib/queries/dashboard";
 import { useRepositories } from "@/lib/queries/repos";
@@ -185,7 +186,7 @@ function DashboardBody({
             <div className="mt-2.5 flex items-center gap-2">
               <Ring value={m.value} tone={m.tone} size={48} />
             </div>
-            <p className="mt-2 font-mono text-[11px] text-subtle">{m.note}</p>
+            <p className="mt-2 font-mono text-[11px] text-subtle">{capitalizeFirst(m.note)}</p>
           </div>
         ))}
       </div>
@@ -243,7 +244,7 @@ function DashboardBody({
           <Panel>
             <PanelHeader
               title="AI insights"
-              subtitle="generated from the current analysis"
+              subtitle="Generated from the current analysis"
               icon={<Sparkles className="size-3.5" />}
             />
             <div className="space-y-2 p-3">
@@ -260,7 +261,7 @@ function DashboardBody({
                     style={{ borderLeftColor: toneColor(insight.tone), borderLeftWidth: 3 }}
                   >
                     <div className="mb-1 flex items-center gap-2">
-                      <Tag tone={insight.tone}>{insight.tone}</Tag>
+                      <Tag tone={insight.tone} caps>{insight.tone}</Tag>
                       <p className="text-[12.5px] font-medium">{insight.title}</p>
                     </div>
                     <p className="text-[12px] leading-relaxed text-secondary-foreground">
@@ -326,7 +327,7 @@ function DashboardBody({
       <Panel>
         <PanelHeader
           title="Recent changes"
-          subtitle="architecture impact per commit"
+          subtitle="Architecture impact per commit"
           actions={
             <Link
               to="/app/compare"
@@ -370,6 +371,7 @@ function DashboardBody({
                   </td>
                   <td className="px-4 py-2.5">
                     <Tag
+                      caps
                       tone={
                         c.impact === "high"
                           ? "danger"

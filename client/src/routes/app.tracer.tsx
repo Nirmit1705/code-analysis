@@ -72,7 +72,7 @@ function Tracer() {
           <PanelHeader
             title={feature}
             subtitle={`${flow.length} hops · 4 services · 1 database write`}
-            actions={<Tag tone="violet">trace resolved</Tag>}
+            actions={<Tag tone="violet" caps>trace resolved</Tag>}
           />
           <div className="p-5">
             <ol className="mx-auto max-w-md space-y-0">

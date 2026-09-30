@@ -24,7 +24,7 @@ import { useActiveRepositoryId } from "@/lib/active-repo";
 import { useCompare, type CompareRead, type DependencyRisk } from "@/lib/queries/compare";
 import { completedRuns, useAnalysisRuns, type AnalysisRunRead } from "@/lib/queries/history";
 import { useRepositories } from "@/lib/queries/repos";
-import { cn } from "@/lib/utils";
+import { capitalizeFirst, cn } from "@/lib/utils";
 
 // `base`/`head` deep-link a specific pair of analysis run ids (History's
 // per-row "Compare" link is the producer). Both must be present and resolve
@@ -320,7 +320,7 @@ function CompareResult({
                       <Plus className="mt-0.5 size-3.5 shrink-0 text-success" />
                       <div className="min-w-0">
                         <p className="mono text-[11.5px] break-all">{f.path}</p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">{f.note}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">{capitalizeFirst(f.note)}</p>
                       </div>
                     </li>
                   ))}
@@ -348,7 +348,7 @@ function CompareResult({
                       <Minus className="mt-0.5 size-3.5 shrink-0 text-danger" />
                       <div className="min-w-0">
                         <p className="mono text-[11.5px] break-all">{f.path}</p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">{f.note}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">{capitalizeFirst(f.note)}</p>
                       </div>
                     </li>
                   ))}
@@ -436,7 +436,7 @@ function CompareResult({
                         <td className="px-4 py-2.5 font-mono text-[11.5px] whitespace-nowrap">{d.edge}</td>
                         <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{d.change}</td>
                         <td className="px-4 py-2.5">
-                          <Tag tone={riskTone(d.risk)}>{d.risk}</Tag>
+                          <Tag tone={riskTone(d.risk)} caps>{d.risk}</Tag>
                         </td>
                       </tr>
                     ))}

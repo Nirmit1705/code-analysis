@@ -165,7 +165,7 @@ export function TopBar() {
         ) : null}
         {activeRepository ? (
           <span className="hidden font-mono text-[11px] text-subtle xl:inline">
-            analyzed {lastAnalyzedLabel}
+            Analyzed {lastAnalyzedLabel}
           </span>
         ) : null}
         <button className="focus-ring flex items-center gap-2 rounded-md border border-border bg-surface py-1 pr-2 pl-1 hover:border-border-strong">

@@ -140,7 +140,7 @@ function Architecture() {
           </button>
         ) : null}
         <span className="ml-auto font-mono text-[11px] text-subtle">
-          scroll to zoom · drag to pan · click a node for detail
+          Scroll to zoom · drag to pan · click a node for detail
         </span>
       </div>
 

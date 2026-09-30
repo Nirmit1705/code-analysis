@@ -443,7 +443,7 @@ function Dependencies() {
               value={filteredCoupled.length}
               sub={
                 filteredCoupled[0]
-                  ? `top: ${filteredCoupled[0].module} (score ${filteredCoupled[0].score})`
+                  ? `Top: ${filteredCoupled[0].module} (score ${filteredCoupled[0].score})`
                   : "no internal edges"
               }
               accent="var(--violet-soft)"
@@ -451,7 +451,7 @@ function Dependencies() {
             <Readout
               label="Orphan files"
               value={filteredOrphans.length}
-              sub="no internal imports, either direction"
+              sub="No internal imports, either direction"
               accent={filteredOrphans.length > 0 ? "var(--warning)" : "var(--success)"}
             />
             <Readout
@@ -461,7 +461,7 @@ function Dependencies() {
                 filteredExternal.length > 0
                   ? `${filteredExternal.reduce((sum, e) => sum + e.used_by, 0)} usage site(s)`
                   : showExternalFindings
-                    ? "none flagged"
+                    ? "None flagged"
                     : "not attributed to a layer — see Libraries"
               }
               accent={filteredExternal.length > 0 ? "var(--warning)" : "var(--success)"}
@@ -484,7 +484,7 @@ function Dependencies() {
                 {topCycle ? (
                   <>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <Tag tone={severityTone(topCycle.severity)}>{topCycle.severity}</Tag>
+                      <Tag tone={severityTone(topCycle.severity)} caps>{topCycle.severity}</Tag>
                       <span className="font-mono text-[11.5px] text-subtle">
                         {topCycle.files.length} files, mutually reachable — no acyclic import order
                         exists
@@ -526,7 +526,7 @@ function Dependencies() {
             <Panel>
               <PanelHeader
                 title="Highly coupled modules"
-                subtitle="fan-in + fan-out, relative to this repo's most-coupled module"
+                subtitle="Fan-in + fan-out, relative to this repo's most-coupled module"
               />
               {filteredCoupled.length ? (
                 <>
@@ -584,7 +584,7 @@ function Dependencies() {
                       <span className="min-w-0 flex-1 break-words font-mono text-[11.5px]">
                         {describeCycle(c)}
                       </span>
-                      <Tag tone={severityTone(c.severity)} className="shrink-0">
+                      <Tag tone={severityTone(c.severity)} caps className="shrink-0">
                         {c.severity}
                       </Tag>
                       <Tag mono className="shrink-0">
@@ -605,7 +605,7 @@ function Dependencies() {
             <Panel>
               <PanelHeader
                 title="Orphan files"
-                subtitle="no internal imports either direction"
+                subtitle="No internal imports either direction"
                 icon={<PackageX className="size-3.5" />}
               />
               {filteredOrphans.length ? (
@@ -637,7 +637,7 @@ function Dependencies() {
                 filteredExternal.length
                   ? `${filteredExternal.length} outdated package${filteredExternal.length === 1 ? "" : "s"} flagged`
                   : showExternalFindings
-                    ? "no outdated packages flagged"
+                    ? "No outdated packages flagged"
                     : "not attributed to a layer"
               }
               icon={<AlertOctagon className="size-3.5" />}
@@ -665,7 +665,7 @@ function Dependencies() {
                           {d.used_by} file{d.used_by === 1 ? "" : "s"}
                         </td>
                         <td className="px-4 py-2.5">
-                          <Tag tone={severityTone(d.severity)}>{d.severity}</Tag>
+                          <Tag tone={severityTone(d.severity)} caps>{d.severity}</Tag>
                         </td>
                       </tr>
                     ))}
@@ -690,7 +690,7 @@ function Dependencies() {
           <Panel>
             <PanelHeader
               title="Dependency map"
-              subtitle="components grouped by classified role"
+              subtitle="Components grouped by classified role"
               icon={<Layers className="size-3.5" />}
             />
             <div className="p-4">

@@ -60,7 +60,7 @@ function SettingsPage() {
 
       {tab === "profile" ? (
         <Panel>
-          <PanelHeader title="Your profile" subtitle="signed in with GitHub" />
+          <PanelHeader title="Your profile" subtitle="Signed in with GitHub" />
           <div className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Full name" value="Maya Okafor" />
             <Field label="Email" value="maya@hiresight.io" />
@@ -142,7 +142,7 @@ function SettingsPage() {
       {tab === "billing" ? (
         <div className="grid gap-3 lg:grid-cols-2">
           <Panel ambient>
-            <PanelHeader title="Current plan" subtitle="Team · billed annually" actions={<Tag tone="violet">active</Tag>} />
+            <PanelHeader title="Current plan" subtitle="Team · billed annually" actions={<Tag tone="violet" caps>active</Tag>} />
             <div className="space-y-3 p-4">
               <p className="font-mono text-[22px]">$49<span className="text-[12px] text-subtle"> / developer / month</span></p>
               <ul className="space-y-1.5 text-[12px] text-muted-foreground">

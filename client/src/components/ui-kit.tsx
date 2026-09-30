@@ -64,11 +64,17 @@ export function Tag({
   children,
   tone = "neutral",
   mono,
+  caps,
   className,
 }: {
   children: ReactNode;
   tone?: Tone;
   mono?: boolean;
+  /** For severity / risk / status badges (HIGH, DANGER, COMPLETED…): upper
+   * case, a touch smaller and letter-spaced so the capitals don't look
+   * oversized next to sentence-case text. Leave off for descriptive tags
+   * (file names, dependency names, branch names), which must keep their case. */
+  caps?: boolean;
   className?: string;
 }) {
   const t = toneMap[tone];
@@ -80,6 +86,7 @@ export function Tag({
         t.bg,
         t.ring,
         mono && "font-mono",
+        caps && "text-[10px] font-semibold tracking-[0.06em] uppercase",
         className,
       )}
     >

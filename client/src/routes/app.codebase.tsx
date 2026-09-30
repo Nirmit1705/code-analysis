@@ -324,7 +324,7 @@ function CodebaseExplorer({
             ) : null}
             {complexity?.score != null ? (
               <Tag tone={complexityTone} className="shrink-0">
-                complexity {complexity.score} ({complexity.label})
+                Complexity {complexity.score} ({complexity.label})
               </Tag>
             ) : null}
             <span className="ml-auto shrink-0 font-mono text-[11px] text-subtle">
@@ -427,7 +427,7 @@ function CodebaseExplorer({
                     <span className="font-mono text-[17px]">
                       {fileInsight.data.complexity.score}
                     </span>
-                    <Tag tone={complexityTone}>{fileInsight.data.complexity.label}</Tag>
+                    <Tag tone={complexityTone} caps>{fileInsight.data.complexity.label}</Tag>
                   </div>
                   <div className="mt-2">
                     <ScoreBar

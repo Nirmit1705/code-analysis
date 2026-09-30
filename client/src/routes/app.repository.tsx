@@ -33,13 +33,13 @@ function RepositorySettings() {
       </div>
 
       <Panel>
-        <PanelHeader title="Connection" icon={<Github className="size-3.5" />} actions={<Tag tone="success">connected</Tag>} />
+        <PanelHeader title="Connection" icon={<Github className="size-3.5" />} actions={<Tag tone="success" caps>connected</Tag>} />
         <dl className="grid gap-px bg-border sm:grid-cols-2">
           {[
             ["Repository", repo.name],
             ["Default branch", repo.branch],
             ["Installation", "GitHub App · hiresight org"],
-            ["Access", "read-only · contents, metadata"],
+            ["Access", "Read-only · contents, metadata"],
             ["Last analysis", "12 minutes ago · a3f91c2"],
             ["Indexed size", "184 MB · 3,184 files"],
           ].map(([k, v]) => (
@@ -52,7 +52,7 @@ function RepositorySettings() {
       </Panel>
 
       <Panel>
-        <PanelHeader title="Tracked branches" subtitle="analysed automatically" />
+        <PanelHeader title="Tracked branches" subtitle="Analysed automatically" />
         <div className="space-y-2 p-4">
           {["main", "release/2.4", "feature/payment", "develop", "fix/session-rotation"].map((b) => {
             const on = branches.includes(b);
@@ -77,8 +77,8 @@ function RepositorySettings() {
         <div className="grid gap-2 p-4 sm:grid-cols-3">
           {[
             { id: "on-push", title: "On every push", sub: "recommended" },
-            { id: "daily", title: "Daily at 02:00", sub: "lower cost" },
-            { id: "manual", title: "Manual only", sub: "full control" },
+            { id: "daily", title: "Daily at 02:00", sub: "Lower cost" },
+            { id: "manual", title: "Manual only", sub: "Full control" },
           ].map((o) => (
             <button
               key={o.id}
@@ -96,7 +96,7 @@ function RepositorySettings() {
       </Panel>
 
       <Panel>
-        <PanelHeader title="Ignore patterns" subtitle="gitignore syntax · excluded from indexing" icon={<Settings className="size-3.5" />} />
+        <PanelHeader title="Ignore patterns" subtitle="Gitignore syntax · excluded from indexing" icon={<Settings className="size-3.5" />} />
         <div className="p-4">
           <textarea
             value={ignore}
@@ -108,7 +108,7 @@ function RepositorySettings() {
       </Panel>
 
       <Panel className="border-danger/25">
-        <PanelHeader title="Danger zone" subtitle="these actions cannot be undone" />
+        <PanelHeader title="Danger zone" subtitle="These actions cannot be undone" />
         <div className="flex flex-wrap items-center gap-3 p-4">
           <button className="focus-ring flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12px] hover:border-border-strong">
             Purge index and re-analyze

@@ -66,7 +66,7 @@ function SignUp() {
         GitHub connects from onboarding, once you have an account — create one with email first.
       </p>
       <p className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10.5px] text-subtle">
-        <ShieldCheck className="size-3 text-success" /> read-only access · no code stored
+        <ShieldCheck className="size-3 text-success" /> Read-only access · no code stored
       </p>
 
       <div className="my-5 flex items-center gap-3">

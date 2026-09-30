@@ -393,7 +393,7 @@ function Impact() {
           <Panel className="h-fit">
             <PanelHeader
               title="Recent runs"
-              subtitle="select one to compute impact"
+              subtitle="Select one to compute impact"
               icon={<Target className="size-3.5" />}
             />
             {groupByBranch(runs).map(([branch, branchRuns]) => (
