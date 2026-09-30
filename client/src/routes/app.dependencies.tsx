@@ -273,7 +273,7 @@ function CycleRing({ cycle }: { cycle: CircularGroup }) {
               y={p.y + 4}
               textAnchor="middle"
               className="fill-foreground font-mono"
-              style={{ fontSize: 11 }}
+              style={{ fontSize: 12.5 }}
             >
               {i + 1}
             </text>
@@ -282,7 +282,7 @@ function CycleRing({ cycle }: { cycle: CircularGroup }) {
               y={p.ly + 3.5}
               textAnchor={p.anchor}
               className="fill-subtle font-mono"
-              style={{ fontSize: 10 }}
+              style={{ fontSize: 11.5 }}
             >
               {truncateLabel(basename(cycle.files[i]!))}
             </text>

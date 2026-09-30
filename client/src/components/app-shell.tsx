@@ -183,7 +183,7 @@ export function TopBar() {
 // the collapsed width (+ its left gutter) on `main`; expanding *overlays* the
 // content rather than pushing it, so pages never reflow on hover.
 const NAV_COLLAPSED = "w-[52px]";
-const NAV_EXPANDED = "hover:w-[232px] focus-within:w-[232px]";
+const NAV_EXPANDED = "hover:w-[248px] focus-within:w-[248px]";
 
 /** Desktop-only (`lg+`) icon rail in a tall capsule: icons only until the
  * pointer (or keyboard focus) enters it, then it widens to reveal labels.
@@ -234,7 +234,7 @@ export function SideNav() {
                       aria-label={item.label}
                       title={item.label}
                       className={cn(
-                        "focus-ring group relative flex h-10 items-center gap-3 rounded-full pl-[9px] text-[14px] transition-colors",
+                        "focus-ring group relative flex h-10 items-center gap-3 rounded-full pl-[9px] text-[15.5px] transition-colors",
                         active
                           ? "bg-violet/15 text-foreground ring-1 ring-inset ring-violet/25"
                           : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
@@ -260,7 +260,7 @@ export function SideNav() {
           </div>
         ))}
         <div className="mt-auto pt-2">
-          <div className="flex h-10 items-center gap-3 rounded-full pl-[9px] text-[14px] text-muted-foreground">
+          <div className="flex h-10 items-center gap-3 rounded-full pl-[9px] text-[15.5px] text-muted-foreground">
             <Command className="size-[22px] shrink-0 text-violet-soft" />
             <span className={cn("flex items-center gap-2", reveal)}>
               Command palette
@@ -282,13 +282,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <TopBar />
       {/* `lg:pl-[76px]` = capsule gutter (12) + collapsed width (52) + gap (12).
           While the capsule is hovered/focused the content's left offset grows to
-          256px = gutter (12) + expanded width (232) + gap (12), i.e. by exactly
+          272px = gutter (12) + expanded width (248) + gap (12), i.e. by exactly
           the amount the capsule widens, on the same 200ms ease — so the content
           never sits under it. Pure CSS via `:has()`, no shared state. Padding,
           not a transform, so nothing is clipped off the right edge; the page
           reflows to the narrower width instead. Keep 256 in sync with
           `NAV_EXPANDED`. */}
-      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[76px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[nav:hover]:pl-[256px] lg:has-[nav:focus-within]:pl-[256px]">
+      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[76px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[nav:hover]:pl-[272px] lg:has-[nav:focus-within]:pl-[272px]">
         <SideNav />
         <main className="min-w-0 flex-1">{children}</main>
       </div>

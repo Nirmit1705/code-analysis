@@ -13,7 +13,7 @@
 import type { ArchGraphEdge, ModuleKind } from "@/components/arch-graph";
 import type { ArchitectureGraphEdge } from "@/lib/queries/architecture";
 
-const NODE_W = 152;
+const NODE_W = 172;
 const NODE_H = 52;
 const COLUMN_GAP = 88;
 const ROW_GAP = 66;

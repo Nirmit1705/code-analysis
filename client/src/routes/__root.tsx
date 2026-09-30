@@ -92,6 +92,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
+      // Plus Jakarta Sans (UI) + JetBrains Mono (code, shas, numbers), from
+      // Google Fonts. `display=swap` shows text immediately in the fallback
+      // and swaps once loaded. Must match `--font-sans`/`--font-mono` in
+      // `styles.css` — those names were referenced there before but never
+      // actually loaded, so the app was silently rendering in a system font.
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap",
+      },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
   }),

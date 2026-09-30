@@ -55,7 +55,7 @@ const kindStyle: Record<ModuleKind, { fill: string; stroke: string; glow: string
   },
 };
 
-const NODE_W = 152;
+const NODE_W = 172;
 const NODE_H = 52;
 
 function edgePath(a: ArchGraphNode, b: ArchGraphNode) {
@@ -192,7 +192,7 @@ export function ArchGraph({
                     y={(a.y + b.y) / 2 + NODE_H / 2 - 6}
                     textAnchor="middle"
                     className="fill-subtle font-mono"
-                    style={{ fontSize: 9 }}
+                    style={{ fontSize: 10.5 }}
                   >
                     {e.label}
                   </text>
@@ -251,7 +251,7 @@ export function ArchGraph({
                   x={14}
                   y={21}
                   className="fill-foreground"
-                  style={{ fontSize: 12, fontWeight: 550 }}
+                  style={{ fontSize: 13, fontWeight: 550 }}
                 >
                   {n.label}
                 </text>
@@ -259,7 +259,7 @@ export function ArchGraph({
                   x={14}
                   y={37}
                   className="fill-subtle"
-                  style={{ fontSize: 10, fontFamily: "var(--font-mono)" }}
+                  style={{ fontSize: 11.5, fontFamily: "var(--font-mono)" }}
                 >
                   {n.files} files
                 </text>

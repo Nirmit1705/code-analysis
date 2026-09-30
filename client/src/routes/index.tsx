@@ -271,13 +271,17 @@ function Landing() {
       <section className="relative overflow-hidden border-b border-border ambient-hero">
         <div className="absolute inset-0 grid-field opacity-60" />
         <div className="relative mx-auto max-w-300 px-5 pt-22 pb-18">
-          <div className="mx-auto max-w-5xl text-center">
-            <h1 className="mt-7 text-[56px] leading-[1.02] font-extrabold tracking-[-0.035em] text-foreground md:text-[74px] lg:text-[82px]">
+          <div className="mx-auto text-center">
+            {/* Headline/subtitle sizes here deliberately avoid the values that
+                have an entry in `styles.css`'s size-override table (e.g. 44, 20,
+                58): that table is unlayered, so it beats responsive variants
+                like `md:`/`lg:` and would pin the size at every width. */}
+            <h1 className="mt-7 text-[46px] leading-[1.04] font-extrabold tracking-[-0.035em] text-foreground md:text-[66px] lg:text-[74px] xl:text-[88px]">
               Understand Any Codebase.
               <br />
               <span className="text-[oklch(0.75_0.19_44)]">Instantly.</span>
             </h1>
-            <p className="mx-auto mt-7 max-w-3xl text-[18px] font-medium leading-relaxed text-muted-foreground md:text-[20px]">
+            <p className="mx-auto mt-8 max-w-3xl text-[21px] font-medium leading-relaxed text-muted-foreground md:text-[25px]">
               AI-powered codebase intelligence for developers who need to understand, analyze, and
               maintain complex software.
             </p>
