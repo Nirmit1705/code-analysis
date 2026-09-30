@@ -30,6 +30,10 @@ export const ANALYSIS_RUN_STAGES = [
 
 export type AnalysisRunStatus = (typeof ANALYSIS_RUN_STAGES)[number] | "completed" | "failed";
 
+/** Mirrors `AnalysisRunTriggerSource` (Phase 9.5): a user-initiated `POST`
+ * vs. a GitHub `push` webhook delivery. */
+export type AnalysisRunTriggerSource = "manual" | "webhook";
+
 /** Mirrors `AnalysisRunRead` (`server/app/schemas/analysis.py`). */
 export interface AnalysisRunRead {
   id: string;
@@ -37,6 +41,7 @@ export interface AnalysisRunRead {
   branch: string;
   commit_sha: string;
   status: AnalysisRunStatus;
+  trigger_source: AnalysisRunTriggerSource;
   started_at: string;
   completed_at: string | null;
   file_count: number;

@@ -19,7 +19,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.analysis_run import AnalysisRunStatus
+from app.models.analysis_run import AnalysisRunStatus, AnalysisRunTriggerSource
 
 
 class AnalysisProgressEvent(BaseModel):
@@ -55,6 +55,7 @@ class AnalysisRunRead(BaseModel):
     branch: str
     commit_sha: str
     status: AnalysisRunStatus
+    trigger_source: AnalysisRunTriggerSource
     started_at: datetime
     completed_at: datetime | None
     file_count: int
