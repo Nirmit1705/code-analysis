@@ -48,3 +48,10 @@ class ApiRoute:
     handler_name: str
     line_start: int  # 1-indexed span of the route-defining construct (call/annotation+method)
     line_end: int
+    # Phase 10.1 follow-up: names of the middleware passed *between* the path
+    # and the handler on the route call itself (`router.get('/x', auth, h)`
+    # -> `("auth",)`), in order. `None` = this framework's extractor doesn't
+    # record middleware (distinct from `()` = extracted, there is none).
+    # Only per-route arguments: middleware applied via `app.use(...)` /
+    # `router.use(...)` is not included.
+    middleware: tuple[str, ...] | None = None

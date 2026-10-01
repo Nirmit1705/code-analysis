@@ -4,8 +4,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.analysis.apis import Framework
@@ -39,6 +39,19 @@ class ApiEndpoint(Base):
     handler_symbol_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("symbols.id", ondelete="SET NULL"), index=True, nullable=True
     )
+    # Phase 10.1: `ApiRoute.handler_name` (the raw handler reference text,
+    # e.g. "register" or an "<inline>" placeholder) and `.line_start` (the
+    # route-defining construct's first line), previously dropped at persist
+    # time. Nullable: rows from runs before this column existed stay NULL —
+    # readers fall back to the `handler_symbol_id` Symbol row for those.
+    handler_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    handler_line_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # End of the route-defining construct (for an Express route with an inline
+    # handler that is the whole callback body). NULL before the follow-up migration.
+    handler_line_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Names of the middleware passed on the route itself, in order. NULL = the
+    # framework's extractor doesn't record it (or an older run); [] = none.
+    middleware: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     file_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), index=True, nullable=False
     )

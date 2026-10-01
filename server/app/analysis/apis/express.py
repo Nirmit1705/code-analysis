@@ -102,6 +102,7 @@ class _RouteCall:
     handler_ref: str | None  # simple identifier text, if the handler arg is a bare identifier
     line_start: int
     line_end: int
+    middleware: tuple[str, ...] = ()  # names between the path and the handler, in order
 
 
 @dataclass(frozen=True)
@@ -411,7 +412,15 @@ def _handle_call(node: Node, extraction: _FileExtraction) -> None:
 def _record_route(node: Node, router_var: str, method: str, arg_nodes: list[Node], extraction: _FileExtraction) -> None:
     path_literal = _js_string_value(arg_nodes[0]) if arg_nodes[0].type == "string" else None
     handler_arg = arg_nodes[-1]
-    handler_ref = _text(handler_arg) if handler_arg.type == "identifier" else None
+    # An identifier (`getUsers`) or a member expression (`UserController.list`,
+    # the common controller-object idiom) is a *named* reference. The latter
+    # never links to a symbol (no file-local function has that dotted name) but
+    # is reported by name rather than mislabeled `<inline>`; arrow/function
+    # expressions and call expressions stay `<inline>`.
+    handler_ref = _text(handler_arg) if handler_arg.type in ("identifier", "member_expression") else None
+    # Everything strictly between the path string and the handler. Only
+    # meaningful when the first argument really is the path literal.
+    middleware_nodes = arg_nodes[1:-1] if arg_nodes[0].type == "string" else []
     extraction.routes.append(
         _RouteCall(
             router_var=router_var,
@@ -420,8 +429,28 @@ def _record_route(node: Node, router_var: str, method: str, arg_nodes: list[Node
             handler_ref=handler_ref,
             line_start=node.start_point[0] + 1,
             line_end=node.end_point[0] + 1,
+            middleware=tuple(name for n in middleware_nodes for name in _middleware_names(n)),
         )
     )
+
+
+def _middleware_names(node: Node) -> list[str]:
+    """The display name(s) of one middleware argument: an identifier or
+    member expression by its text (`authenticateToken`, `auth.required`), a
+    call by its callee (`passport.authenticate('google')` ->
+    `passport.authenticate`, `rateLimit({...})` -> `rateLimit`), an array
+    expanded element by element, an anonymous function as `<inline>`. Names
+    only — nothing here claims what a middleware does."""
+    if node.type in ("identifier", "member_expression"):
+        return [_text(node)]
+    if node.type == "call_expression":
+        callee = node.child_by_field_name("function")
+        return [_text(callee)] if callee is not None else ["<expression>"]
+    if node.type in _FUNCTION_VALUE_TYPES:
+        return ["<inline>"]
+    if node.type in ("array", "array_expression"):
+        return [name for child in node.named_children for name in _middleware_names(child)]
+    return ["<expression>"]
 
 
 def _record_mount(router_var: str, arg_nodes: list[Node], extraction: _FileExtraction) -> None:
@@ -495,6 +524,7 @@ def compose_routes(
                         handler_name=handler_name,
                         line_start=route.line_start,
                         line_end=route.line_end,
+                        middleware=route.middleware,
                     )
                 )
     return routes

@@ -523,6 +523,14 @@ def persist_analysis_run(
                     method=route.method,
                     path=route.path,
                     handler_symbol_id=handler_symbol_id,
+                    # Phase 10.1: `route.handler_name` always carries the
+                    # raw reference text, even for an unresolved handler;
+                    # truncated to the column width rather than failing the
+                    # whole run over one absurdly long inline expression.
+                    handler_name=route.handler_name[:255] if route.handler_name else None,
+                    handler_line_start=route.line_start,
+                    handler_line_end=route.line_end,
+                    middleware=list(route.middleware) if route.middleware is not None else None,
                     file_id=file_id,
                     module=route.module,
                     framework=route.framework,

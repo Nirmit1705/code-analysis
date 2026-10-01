@@ -144,6 +144,54 @@ def run() -> bool:
         false_positive_paths == [], str(false_positive_paths),
     )
 
+    # --- Phase 10.1: a member-expression handler is reported by name, not "<inline>" ---
+    # In-memory source (not a fixture file) so the pinned route totals above don't move.
+    member_src = (
+        b"const express = require('express');\n"
+        b"const router = express.Router();\n"
+        b"router.get('/a', ctl.list);\n"
+        b"router.get('/b', guard('x'), AuthController.callback);\n"
+        b"router.get('/c', (req, res) => res.send('x'));\n"
+        b"router.get('/d', wrap(handler));\n"
+        b"module.exports = router;\n"
+    )
+    member_routes = compose_routes({"r.js": member_src})
+    names = {r.path: (r.handler_name, r.handler_symbol) for r in member_routes}
+    all_passed &= _check(
+        "member-expression handlers (ctl.list, AuthController.callback) reported by name, no linked symbol",
+        names.get("/a") == ("ctl.list", None) and names.get("/b") == ("AuthController.callback", None),
+        str(names),
+    )
+    all_passed &= _check(
+        "arrow function and call-expression handlers stay <inline>",
+        names.get("/c") == ("<inline>", None) and names.get("/d") == ("<inline>", None),
+        str(names),
+    )
+
+    # --- Phase 10.1 follow-up: per-route middleware names, between path and handler ---
+    mw_src = (
+        b"const express = require('express');\n"
+        b"const router = express.Router();\n"
+        b"router.get('/p', authenticateToken, ctl.profile);\n"
+        b"router.get('/q', passport.authenticate('google', { session: false }), rateLimit({ max: 5 }), h);\n"
+        b"router.get('/r', [checkA, checkB], (req, res) => res.send('x'));\n"
+        b"router.get('/s', (req, res, next) => next(), h);\n"
+        b"router.get('/t', ctl.only);\n"
+        b"module.exports = router;\n"
+    )
+    mw = {r.path: r.middleware for r in compose_routes({"m.js": mw_src})}
+    all_passed &= _check(
+        "middleware: identifier, call callee (not args), array expanded, anonymous fn as <inline>, none -> ()",
+        mw == {
+            "/p": ("authenticateToken",),
+            "/q": ("passport.authenticate", "rateLimit"),
+            "/r": ("checkA", "checkB"),
+            "/s": ("<inline>",),
+            "/t": (),
+        },
+        str(mw),
+    )
+
     return all_passed
 
 
