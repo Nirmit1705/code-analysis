@@ -110,3 +110,25 @@ export function useDebt(repositoryId: string | null) {
 export const SEVERITY_WEIGHT: Record<DebtSeverity, number> = { critical: 5, high: 3, medium: 2, low: 1 };
 
 export const SEVERITIES: DebtSeverity[] = ["critical", "high", "medium", "low"];
+
+/** `GET /repos/{id}/debt/issues/{issue_id}/recommendation` (Phase 10.4): an
+ * AI-written next step for one finding, generated on first view and then cached
+ * server-side. `recommendation` is `null` when generation failed — never an
+ * HTTP error — and a failure is not cached, so asking again retries. */
+export interface DebtRecommendationRead {
+  issue_id: string;
+  recommendation: string | null;
+}
+
+/** Fetched only while a finding is expanded (`enabled`), never for the whole
+ * list. A real recommendation is kept for the session; a `null` is treated as
+ * stale immediately so re-expanding the row (or Retry) asks again. */
+export function useDebtRecommendation(repositoryId: string | null, issueId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["debt", repositoryId, "recommendation", issueId],
+    queryFn: () => apiFetch<DebtRecommendationRead>(`/repos/${repositoryId}/debt/issues/${issueId}/recommendation`),
+    enabled: repositoryId !== null && enabled,
+    retry: false,
+    staleTime: (query) => (query.state.data?.recommendation ? Infinity : 0),
+  });
+}

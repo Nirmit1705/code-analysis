@@ -18,6 +18,7 @@ import {
   SEVERITIES,
   SEVERITY_WEIGHT,
   useDebt,
+  useDebtRecommendation,
   type DebtIssueRead,
   type DebtIssueType,
   type DebtRead,
@@ -176,6 +177,7 @@ function Debt() {
                   filtered.slice(0, limit).map((i) => (
                     <IssueCard
                       key={i.id}
+                      repositoryId={activeRepositoryId}
                       issue={i}
                       open={openId === i.id}
                       onToggle={() => setOpenId(openId === i.id ? null : i.id)}
@@ -323,7 +325,21 @@ function ScorePanel({ data }: { data: DebtRead }) {
   );
 }
 
-function IssueCard({ issue: i, open, onToggle }: { issue: DebtIssueRead; open: boolean; onToggle: () => void }) {
+function IssueCard({
+  repositoryId,
+  issue: i,
+  open,
+  onToggle,
+}: {
+  repositoryId: string;
+  issue: DebtIssueRead;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  // Only fetched while this finding is expanded (the backend reads the file's
+  // code and calls the model on first view, then caches the answer).
+  const recommendation = useDebtRecommendation(repositoryId, i.id, open);
+  const text = recommendation.data?.recommendation ?? null;
   return (
     <Panel>
       <button
@@ -367,7 +383,31 @@ function IssueCard({ issue: i, open, onToggle }: { issue: DebtIssueRead; open: b
             <p className="text-[12.5px] leading-relaxed text-secondary-foreground">{i.why}</p>
           </div>
           <AiNote title="Recommended fix">
-            Not available yet — AI-written recommendations for each finding are coming in a later update.
+            {recommendation.isFetching ? (
+              <span className="block space-y-1.5 py-0.5" role="status" aria-label="Generating a recommendation">
+                <span className="block h-3 w-full animate-pulse rounded bg-violet/20" />
+                <span className="block h-3 w-11/12 animate-pulse rounded bg-violet/20" />
+                <span className="block h-3 w-2/3 animate-pulse rounded bg-violet/20" />
+              </span>
+            ) : text ? (
+              <>
+                {text}
+                <span className="mt-1.5 block text-[10.5px] text-subtle">
+                  AI-written from this finding{i.file_path ? " and the file's code" : ""} — check it against the code before acting.
+                </span>
+              </>
+            ) : (
+              <>
+                Couldn't generate a recommendation right now.{" "}
+                <button
+                  type="button"
+                  onClick={() => void recommendation.refetch()}
+                  className="focus-ring text-violet-soft underline-offset-2 hover:underline"
+                >
+                  Retry
+                </button>
+              </>
+            )}
           </AiNote>
         </div>
       ) : null}
