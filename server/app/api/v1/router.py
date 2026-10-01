@@ -11,6 +11,7 @@ from app.api.v1 import (
     codebase,
     compare,
     dashboard,
+    debt,
     dependencies,
     github,
     impact,
@@ -26,6 +27,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(architecture.router)
 api_router.include_router(codebase.router)
 api_router.include_router(dependencies.router)
+api_router.include_router(debt.router)
 api_router.include_router(api_reference.router)
 api_router.include_router(assistant.router)
 api_router.include_router(compare.router)
