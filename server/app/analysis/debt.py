@@ -69,6 +69,10 @@ Six rules, each independent and additive to the same flat `issues` list:
    anything for a package whose major version doesn't track "how current
    it is".
 
+**Generated files are excluded** (`is_generated_file`): lockfiles, build-wrapper scripts and minified
+bundles are ignored by the large-file, large-module, complexity and missing-documentation rules, and
+their lines are subtracted from their module's totals — see the section below the rules for the list.
+
 All thresholds below are plain module-level constants, deliberately not
 configurable yet (matches the plan's "simple MVP constants" instruction) —
 picked as reasonable-looking round numbers, not derived from any external
@@ -84,7 +88,7 @@ from __future__ import annotations
 import enum
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
 from app.analysis.dependencies import Ecosystem, ExternalDependency
@@ -160,6 +164,93 @@ class DebtAnalysis:
     score: float
 
 
+# --- generated files (excluded from the size/complexity rules) ------------------
+#
+# Dependency lockfiles, build-tool wrapper scripts and minified bundles are
+# machine-written, so "this file is large" / "this module is large" says
+# nothing about maintainability — a 8,000-line `package-lock.json` used to be a
+# CRITICAL large-file finding *and* pushed its whole directory over the
+# large-module bar (Known Issue #38). They are skipped by the large-file,
+# large-module, complexity and missing-documentation rules (the others work from
+# the dependency graph / manifests, which never contain them). The files stay
+# in the run (file tree, LOC totals, Codebase view); only the debt rules ignore
+# them. Matched by basename / suffix, case-insensitively — an explicit, boring
+# list, not a heuristic on file contents.
+#
+# Deliberately NOT here: `requirements.txt` / `pom.xml` / `build.gradle` /
+# `package.json` (hand-maintained manifests — and the outdated-dependency rule
+# reads them), `pyproject.toml`, and migrations.
+GENERATED_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        # JavaScript / TypeScript
+        "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+        "deno.lock",
+        # Python (Flask / FastAPI / Django ...)
+        "poetry.lock", "pipfile.lock", "uv.lock", "pdm.lock", "pylock.toml", "conda-lock.yml",
+        # Java (Spring Boot): Gradle lock state, plus the wrapper scripts the build tools generate
+        "gradle.lockfile", "buildscript-gradle.lockfile", "gradlew", "gradlew.bat", "mvnw", "mvnw.cmd",
+        # Other ecosystems
+        "cargo.lock", "go.sum", "composer.lock", "gemfile.lock", "pubspec.lock", "packages.lock.json",
+        "mix.lock", "podfile.lock", "flake.lock",
+    }
+)
+# `*.lock` / `*.lockfile` catch ecosystem lockfiles not named above; the rest are
+# minified / bundled output and source maps.
+GENERATED_FILE_SUFFIXES: tuple[str, ...] = (".lock", ".lockfile", ".min.js", ".min.css", ".js.map", ".css.map")
+
+
+def is_generated_file(file_path: str) -> bool:
+    """Whether `file_path` (POSIX-relative, any directory) is a lockfile,
+    build-wrapper script or minified/bundled artifact that the size and
+    complexity rules should ignore. Pure string check on the basename."""
+    name = PurePosixPath(file_path).name.lower()
+    return name in GENERATED_FILE_NAMES or name.endswith(GENERATED_FILE_SUFFIXES)
+
+
+def _without_generated_files(
+    file_metrics: list[FileMetrics],
+    module_metrics: list[ModuleMetrics],
+    function_complexity: list[FunctionComplexity],
+    symbols: list[Symbol],
+) -> tuple[list[FileMetrics], list[ModuleMetrics], list[FunctionComplexity], list[Symbol]]:
+    """The four fact lists with generated files removed. A module's file
+    count / line totals have their generated files' share subtracted (a module
+    left with no files is dropped), so a lockfile can't push a directory over
+    the large-module bar."""
+    generated = [fm for fm in file_metrics if is_generated_file(fm.file_path)]
+    if not generated and not any(is_generated_file(fc.symbol.file_path) for fc in function_complexity):
+        return file_metrics, module_metrics, function_complexity, symbols
+
+    removed_files: dict[str, int] = defaultdict(int)
+    removed_lines: dict[str, int] = defaultdict(int)
+    removed_loc: dict[str, int] = defaultdict(int)
+    for fm in generated:
+        removed_files[fm.module] += 1
+        removed_lines[fm.module] += fm.total_lines
+        removed_loc[fm.module] += fm.loc
+
+    adjusted_modules: list[ModuleMetrics] = []
+    for mm in module_metrics:
+        file_count = mm.file_count - removed_files.get(mm.module, 0)
+        if file_count <= 0:
+            continue
+        adjusted_modules.append(
+            replace(
+                mm,
+                file_count=file_count,
+                total_lines=mm.total_lines - removed_lines.get(mm.module, 0),
+                loc=mm.loc - removed_loc.get(mm.module, 0),
+            )
+        )
+
+    return (
+        [fm for fm in file_metrics if not is_generated_file(fm.file_path)],
+        adjusted_modules,
+        [fc for fc in function_complexity if not is_generated_file(fc.symbol.file_path)],
+        [sym for sym in symbols if not is_generated_file(sym.file_path)],
+    )
+
+
 # --- thresholds (medium, high, critical) — see module docstring ---------------
 
 COMPLEXITY_THRESHOLDS: tuple[float, float, float] = (10, 20, 30)
@@ -226,6 +317,9 @@ def analyze_technical_debt(
     issue type, then by target, purely for deterministic output; the plan
     doesn't otherwise prescribe an order) plus the aggregate score
     (`_aggregate_score`)."""
+    file_metrics, module_metrics, function_complexity, symbols = _without_generated_files(
+        file_metrics, module_metrics, function_complexity, symbols
+    )
     issues: list[DebtIssue] = [
         *_check_high_complexity(function_complexity),
         *_check_large_files(file_metrics),

@@ -52,6 +52,7 @@ from app.analysis.debt import (  # noqa: E402
     DebtIssueType,
     DebtSeverity,
     analyze_technical_debt,
+    is_generated_file,
 )
 from app.analysis.dependencies import Ecosystem, ExternalDependency  # noqa: E402
 from app.analysis.graph import CouplingScore, CycleResult, GraphAnalysis  # noqa: E402
@@ -300,12 +301,161 @@ def run_empty() -> bool:
     )
 
 
+def run_generated_files() -> bool:
+    """Lockfiles / wrapper scripts / minified bundles must not count as debt
+    (Known Issue #38: an 8,420-line package-lock.json was a CRITICAL large-file
+    finding and pushed its directory over the large-module bar)."""
+    print("\n=== generated files are ignored by the size/complexity rules ===")
+    ok = True
+
+    positives = [
+        "client/package-lock.json", "yarn.lock", "web/pnpm-lock.yaml", "bun.lockb",           # JS / TS
+        "poetry.lock", "Pipfile.lock", "svc/uv.lock", "pdm.lock",                              # Python (Flask / FastAPI)
+        "gradlew", "gradlew.bat", "mvnw", "mvnw.cmd", "gradle/dependency-locks/x.lockfile",    # Java (Spring Boot)
+        "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock",                               # others
+        "public/app.min.js", "assets/site.min.css", "dist/main.js.map",                        # minified / maps
+        "SERVER/Package-Lock.JSON",                                                            # case-insensitive
+    ]
+    negatives = [
+        "src/clock.ts", "app/deadlock.py", "src/locks.py", "docker-compose.yml", "requirements.txt", "pom.xml",
+        "build.gradle", "package.json", "pyproject.toml", "roadmap.map", "src/app.js", "README.md", "go.mod",
+    ]
+    wrong_pos = [p for p in positives if not is_generated_file(p)]
+    wrong_neg = [p for p in negatives if is_generated_file(p)]
+    ok &= _check("every lockfile / wrapper / minified path is recognised", not wrong_pos, str(wrong_pos))
+    ok &= _check("hand-maintained manifests and look-alike names are NOT recognised", not wrong_neg, str(wrong_neg))
+
+    def fm(path: str, module: str, loc: int) -> FileMetrics:
+        return FileMetrics(file_path=path, module=module, language=None, total_lines=loc + 10, loc=loc)
+
+    # module "app": poetry.lock (9000) + main.py (400) + util.py (100). Raw module LOC 9500 (>= 6000 -> CRITICAL
+    # large module) and poetry.lock alone is >= 1000 (CRITICAL large file). Only main.py (400 -> MEDIUM) should remain.
+    files = [fm("app/poetry.lock", "app", 9000), fm("app/main.py", "app", 400), fm("app/util.py", "app", 100)]
+    modules = [ModuleMetrics(module="app", file_count=3, total_lines=9530, loc=9500, function_count=0, avg_complexity=None, max_complexity=None)]
+    # a Spring Boot module whose only big files are generated: gradlew (350) + mvnw (320) next to a small source file.
+    files += [fm("svc/gradlew", "svc", 350), fm("svc/mvnw", "svc", 320), fm("svc/App.java", "svc", 80)]
+    modules += [ModuleMetrics(module="svc", file_count=3, total_lines=780, loc=750, function_count=0, avg_complexity=None, max_complexity=None)]
+    # a module made only of generated files must be dropped, not crash.
+    files += [fm("locks/yarn.lock", "locks", 7000)]
+    modules += [ModuleMetrics(module="locks", file_count=1, total_lines=7010, loc=7000, function_count=0, avg_complexity=None, max_complexity=None)]
+    # a minified bundle carrying a "complex" function and undocumented symbols must not count either.
+    mini_sym = make_symbol("a", "static/app.min.js", "static", has_docstring=False)
+    mini_syms = [make_symbol(n, "static/app.min.js", "static", has_docstring=False) for n in "abcd"]
+    empty_graph = GraphAnalysis(cycles=[], circular_files=frozenset(), circular_edges=(), coupling=[], orphans=[])
+
+    result = analyze_technical_debt(
+        file_metrics=files,
+        module_metrics=modules,
+        function_complexity=[FunctionComplexity(symbol=mini_sym, complexity=45)],
+        symbols=mini_syms,
+        graph_analysis=empty_graph,
+        external_dependencies=[],
+    )
+    got = [(i.issue_type, i.severity, i.file_path, i.module) for i in result.issues]
+    ok &= _check(
+        "only app/main.py (400 LOC) is left: one MEDIUM large-file issue, nothing else",
+        got == [(DebtIssueType.LARGE_FILE, DebtSeverity.MEDIUM, "app/main.py", "app")],
+        str(got),
+    )
+    ok &= _check("score is exactly that one MEDIUM issue (2.0)", result.score == 2.0, str(result.score))
+
+    # the same 'app' module WITHOUT the lockfile is unchanged — only genuinely large source still counts.
+    real = analyze_technical_debt(
+        file_metrics=[fm("app/big_a.py", "app", 3000), fm("app/big_b.py", "app", 3500)],
+        module_metrics=[ModuleMetrics(module="app", file_count=2, total_lines=6520, loc=6500, function_count=0, avg_complexity=None, max_complexity=None)],
+        function_complexity=[], symbols=[], graph_analysis=empty_graph, external_dependencies=[],
+    )
+    kinds = sorted((i.issue_type.value, i.severity.value) for i in real.issues)
+    ok &= _check(
+        "real oversized source is still flagged (2 CRITICAL large files + 1 CRITICAL large module)",
+        kinds == [("large_file", "critical"), ("large_file", "critical"), ("large_module", "critical")], str(kinds),
+    )
+
+    # a generated file inside a module whose REAL code is large: only the generated share is subtracted.
+    mixed = analyze_technical_debt(
+        file_metrics=[fm("m/pkg-lock.lock", "m", 5000), fm("m/real.py", "m", 1600)],
+        module_metrics=[ModuleMetrics(module="m", file_count=2, total_lines=6620, loc=6600, function_count=0, avg_complexity=None, max_complexity=None)],
+        function_complexity=[], symbols=[], graph_analysis=empty_graph, external_dependencies=[],
+    )
+    mm = [(i.issue_type.value, i.severity.value, i.metric_value) for i in mixed.issues if i.issue_type is DebtIssueType.LARGE_MODULE]
+    ok &= _check(
+        "module total excludes only the lockfile: 6600 - 5000 = 1600 LOC -> MEDIUM large module (not CRITICAL)",
+        mm == [("large_module", "medium", 1600.0)], str(mm),
+    )
+    return ok
+
+
+def run_generated_files_pipeline() -> bool:
+    """End to end through the real pipeline (not hand-built facts): a Flask-style
+    repo with a huge poetry.lock and a Spring-style repo with wrapper scripts +
+    a lockfile must produce no lockfile/wrapper debt, while a genuinely large
+    source file next to them is still flagged."""
+    import tempfile
+
+    from app.analysis.graph import analyze_dependency_graph
+    from app.analysis.ingestion import IngestedFile, IngestionResult
+    from app.analysis.pipeline import analyze_ingested
+
+    print("\n=== generated files through the real pipeline (Flask-style + Spring-style repos) ===")
+    ok = True
+    with tempfile.TemporaryDirectory(prefix="debt-e2e-") as tmp:
+        root = Path(tmp)
+
+        def write(rel: str, lines: int, line: str = "x = 1") -> None:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(line for _ in range(lines)) + "\n", encoding="utf-8")
+
+        # Flask / FastAPI style
+        write("api/poetry.lock", 9000, "name = \"pkg\"")
+        write("api/Pipfile.lock", 1200, "\"x\": 1,")
+        write("api/main.py", 450)              # genuinely large source -> MEDIUM large file
+        write("api/util.py", 20)
+        # Spring Boot style
+        write("svc/gradlew", 350, "echo gradle")
+        write("svc/mvnw", 320, "echo maven")
+        write("svc/gradle.lockfile", 4000, "org.example:lib:1.0.0=compileClasspath")
+        write("svc/src/Small.java", 15, "// c")
+        # JS style
+        write("web/package-lock.json", 8000, "  \"a\": 1,")
+        write("web/public/app.min.js", 3000, "var a=1;")
+        write("web/index.js", 10, "var b = 2;")
+
+        files = [
+            IngestedFile(path=p.relative_to(root).as_posix(), absolute_path=p, size_bytes=p.stat().st_size)
+            for p in sorted(root.rglob("*")) if p.is_file()
+        ]
+        result = analyze_ingested(IngestionResult(root_dir=root, files=files, ignored_paths=[]), commit_sha="e" * 40)
+        graph = analyze_dependency_graph(result.dependency_edges)
+        debt = analyze_technical_debt(
+            file_metrics=result.file_metrics, module_metrics=result.module_metrics,
+            function_complexity=result.function_complexity, symbols=result.symbols,
+            graph_analysis=graph, external_dependencies=result.external_dependencies,
+        )
+        flagged_paths = {i.file_path for i in debt.issues if i.file_path}
+        generated_flagged = sorted(p for p in flagged_paths if is_generated_file(p))
+        ok &= _check("the pipeline really ingested the lock/wrapper files (so this isn't vacuous)",
+                     {"api/poetry.lock", "svc/gradlew", "web/package-lock.json"} <= {f.file_path for f in result.file_metrics},
+                     str(sorted(f.file_path for f in result.file_metrics)))
+        ok &= _check("no lockfile / wrapper script / minified bundle appears in any finding", not generated_flagged, str(generated_flagged))
+        large_modules = [(i.module, i.metric_value) for i in debt.issues if i.issue_type is DebtIssueType.LARGE_MODULE]
+        ok &= _check("no large-module finding (raw module totals were about 10.7k, 4.7k and 11k LOC)", large_modules == [], str(large_modules))
+        large_files = [(i.file_path, i.severity.value) for i in debt.issues if i.issue_type is DebtIssueType.LARGE_FILE]
+        ok &= _check("the genuinely large source file is still flagged", large_files == [("api/main.py", "medium")], str(large_files))
+        ok &= _check("the whole run's debt is that one finding (score 2.0)", len(debt.issues) == 1 and debt.score == 2.0, f"{len(debt.issues)} {debt.score}")
+    return ok
+
+
 if __name__ == "__main__":
     r1 = run_dirty()
     r2 = run_clean()
     r3 = run_empty()
+    r4 = run_generated_files()
+    r5 = run_generated_files_pipeline()
     print("\n=== Summary ===")
     print(f"dirty: {'PASS' if r1 else 'FAIL'}")
     print(f"clean: {'PASS' if r2 else 'FAIL'}")
     print(f"empty: {'PASS' if r3 else 'FAIL'}")
-    sys.exit(0 if (r1 and r2 and r3) else 1)
+    print(f"generated files: {'PASS' if r4 else 'FAIL'}")
+    print(f"generated files (pipeline): {'PASS' if r5 else 'FAIL'}")
+    sys.exit(0 if (r1 and r2 and r3 and r4 and r5) else 1)
