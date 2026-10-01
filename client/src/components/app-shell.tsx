@@ -179,11 +179,11 @@ export function TopBar() {
   );
 }
 
-// Collapsed width / expanded width of the floating capsule. `AppShell` reserves
+// Collapsed width / expanded width of the floating capsule (each = 16px of bezel+track padding + the item). `AppShell` reserves
 // the collapsed width (+ its left gutter) on `main`; expanding *overlays* the
 // content rather than pushing it, so pages never reflow on hover.
-const NAV_COLLAPSED = "w-[52px]";
-const NAV_EXPANDED = "hover:w-[248px] has-[:focus-visible]:w-[248px]";
+const NAV_COLLAPSED = "w-[56px]";
+const NAV_EXPANDED = "hover:w-[252px] has-[:focus-visible]:w-[252px]";
 
 /** Desktop-only (`lg+`) icon rail in a tall capsule: icons only until the
  * pointer (or keyboard focus) enters it, then it widens to reveal labels.
@@ -200,22 +200,25 @@ export function SideNav() {
       aria-label="Primary"
       data-side-nav
       className={cn(
-        // Outer shell: width, the soft ring and the inner shadow. It never
-        // scrolls — the inner div below does — so the ring stays put.
-        "group/nav fixed top-[3.75rem] bottom-4 left-3 z-30 hidden rounded-[26px] bg-surface/80 backdrop-blur-xl transition-[width] duration-200 ease-out lg:block",
-        // Inner shadow (rim highlight + soft vignette) plus a diffuse drop shadow.
-        "shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),inset_0_0_18px_rgba(0,0,0,0.55),0_18px_40px_-18px_rgba(0,0,0,0.8)]",
-        // A 1px grey gradient ring drawn with a masked pseudo-element instead
-        // of `border`: brighter at the top-left, fading down, so it reads as
-        // a lit edge rather than an outline.
-        "before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:p-px",
-        "before:[background:linear-gradient(165deg,rgba(255,255,255,0.22),rgba(255,255,255,0.05)_45%,rgba(255,255,255,0.11))]",
-        "before:[mask:linear-gradient(#000_0_0)_content-box,linear-gradient(#000_0_0)] before:[mask-composite:exclude] before:[-webkit-mask-composite:xor]",
+        // Outer shell: a raised capsule. Its 5px padding is the visible bezel; the
+        // recessed track below sits inside it. The shell is lit from the top (a
+        // light-to-dark vertical gradient) and floats on a layered drop shadow: a
+        // tight contact shadow plus a wide, soft one underneath. Width, rim
+        // highlight and shadows live here. It never scrolls — the inner track
+        // does — so the bezel stays put.
+        "group/nav fixed top-[3.75rem] bottom-4 left-3 z-30 hidden rounded-[30px] bg-gradient-to-b from-surface-3/90 to-surface-2/60 p-[5px] ring-1 ring-white/[0.07] backdrop-blur-xl transition-[width] duration-200 ease-out lg:block",
+        "shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.5),0_3px_8px_rgba(0,0,0,0.5),0_28px_56px_-14px_rgba(0,0,0,0.95)]",
         NAV_COLLAPSED,
         NAV_EXPANDED,
       )}
     >
-      <div className="flex h-full flex-col overflow-x-hidden overflow-y-auto rounded-[inherit] p-1.5 [scrollbar-width:none]">
+      {/* The recessed track: a groove the items sit in. A vertical gradient (darkest
+          at the top, where the inner shadow falls, lightening toward the bottom)
+          plus four inset shadows: a deep soft one from the top edge, a faint
+          side vignette, a 1px dark hairline, and a thin light line along the
+          bottom lip. `p-[3px]` + the shell's 5px = 8px each side, which is what
+          `NAV_COLLAPSED` / the `AppShell` offsets are sized for. */}
+      <div className="flex h-full flex-col overflow-x-hidden overflow-y-auto rounded-[25px] bg-gradient-to-b from-background via-background/90 to-surface/70 p-[3px] shadow-[inset_0_8px_16px_-6px_rgba(0,0,0,0.8),inset_0_0_14px_rgba(0,0,0,0.45),inset_0_0_0_1px_rgba(0,0,0,0.4),inset_0_-1px_0_rgba(255,255,255,0.09)] [scrollbar-width:none]">
         {nav.map((group) => (
           <div key={group.section}>
             {/* A hairline when collapsed, the section name when expanded. */}
@@ -237,7 +240,9 @@ export function SideNav() {
                       className={cn(
                         "focus-ring group relative flex h-10 items-center gap-3 rounded-full pl-[9px] text-[15.5px] transition-colors",
                         active
-                          ? "bg-violet/15 text-foreground ring-1 ring-inset ring-violet/25"
+                          ? // A raised pebble: a glossy top-lit gradient, a top highlight and a dark
+                            // lower edge, lifted off the track by its own shadow.
+                            "bg-gradient-to-b from-violet/40 to-violet/14 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.16),inset_0_-1px_0_rgba(0,0,0,0.35),0_8px_16px_-6px_rgba(0,0,0,0.95),0_2px_4px_rgba(0,0,0,0.5)]"
                           : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
                       )}
                     >
@@ -281,13 +286,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen ambient-app">
       <TopBar />
-      {/* `lg:pl-[76px]` = capsule gutter (12) + collapsed width (52) + gap (12).
+      {/* `lg:pl-[80px]` = capsule gutter (12) + collapsed width (56) + gap (12).
           While the capsule is hovered (or keyboard-focused) the content's left
-          offset grows to 272px = gutter (12) + expanded width (248) + gap (12),
+          offset grows to 276px = gutter (12) + expanded width (252) + gap (12),
           i.e. by exactly the amount the capsule widens, on the same 200ms ease
           — so the content never sits under it. Pure CSS via `:has()`, no shared
           state. Padding, not a transform, so nothing is clipped off the right
-          edge; the page reflows to the narrower width instead. Keep 272 in sync
+          edge; the page reflows to the narrower width instead. Keep 276 in sync
           with `NAV_EXPANDED`.
 
           Two scoping rules, both learned from real bugs: the selector targets
@@ -295,7 +300,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           Dependencies scope tabs, used to trigger the shift on hover), and it
           uses `:focus-visible`, never `:focus-within` (a link clicked with the
           mouse keeps focus, which left the capsule stuck open). */}
-      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[76px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[[data-side-nav]:hover]:pl-[272px] lg:has-[[data-side-nav]_:focus-visible]:pl-[272px]">
+      <div className="flex min-h-[calc(100vh-3rem)] lg:pl-[80px] lg:transition-[padding-left] lg:duration-200 lg:ease-out lg:has-[[data-side-nav]:hover]:pl-[276px] lg:has-[[data-side-nav]_:focus-visible]:pl-[276px]">
         <SideNav />
         <main className="min-w-0 flex-1">{children}</main>
       </div>
