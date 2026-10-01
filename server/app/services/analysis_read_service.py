@@ -80,6 +80,28 @@ def get_previous_completed_run(
     ).scalar_one_or_none()
 
 
+def get_baseline_run(db: Session, run: AnalysisRun) -> AnalysisRun | None:
+    """The newest completed run on the same branch, completed before `run`,
+    at a *different commit* (Phase 10.1/10.2). A re-analysis of the same
+    commit changes nothing, so it is skipped — otherwise "since the previous
+    run" would read as an empty change after every manual re-analyze. `None`
+    when `run` has no `completed_at` or nothing earlier qualifies."""
+    if run.completed_at is None:
+        return None
+    return db.execute(
+        select(AnalysisRun)
+        .where(
+            AnalysisRun.repository_id == run.repository_id,
+            AnalysisRun.status == AnalysisRunStatus.COMPLETED,
+            AnalysisRun.branch == run.branch,
+            AnalysisRun.commit_sha != run.commit_sha,
+            AnalysisRun.completed_at < run.completed_at,
+        )
+        .order_by(AnalysisRun.completed_at.desc(), AnalysisRun.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def load_dependency_edges(db: Session, analysis_run_id: uuid.UUID) -> list[PureDependencyEdge]:
     """Reconstructs Phase 3.7's pure `DependencyEdge` dataclass
     (`app.analysis.dependencies`) from the persisted `File`+`DependencyEdge`

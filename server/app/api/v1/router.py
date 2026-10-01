@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     analysis,
+    api_reference,
     architecture,
     assistant,
     auth,
@@ -25,6 +26,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(architecture.router)
 api_router.include_router(codebase.router)
 api_router.include_router(dependencies.router)
+api_router.include_router(api_reference.router)
 api_router.include_router(assistant.router)
 api_router.include_router(compare.router)
 api_router.include_router(impact.router)
