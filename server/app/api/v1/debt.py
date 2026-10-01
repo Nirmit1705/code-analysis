@@ -11,13 +11,16 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.models.analysis_run import AnalysisRun
+from app.models.debt_issue import DebtIssue
 from app.models.repository import Repository
 from app.models.user import User
-from app.schemas.debt import DebtRead
-from app.services import analysis_read_service, debt_service, repo_service
+from app.schemas.debt import DebtRead, DebtRecommendationRead
+from app.services import analysis_read_service, debt_insight_service, debt_service, repo_service
 
 router = APIRouter(tags=["debt"])
 
@@ -46,3 +49,31 @@ def get_debt(
         return DebtRead(analyzed=False)
 
     return debt_service.build_debt_read(db, repository, current_run)
+
+
+@router.get("/repos/{repository_id}/debt/issues/{issue_id}/recommendation", response_model=DebtRecommendationRead)
+def get_debt_recommendation(
+    repository_id: uuid.UUID,
+    issue_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DebtRecommendationRead:
+    """An AI-written next step for one finding, generated on first view and then
+    cached on the row (see `debt_insight_service`). The second GET-triggered
+    `db.commit()` in this codebase, after `file_insight_service`'s. `recommendation`
+    is `None` when generation failed — never a 5xx. 404 only when the repository
+    is not the caller's or the finding does not belong to it (scoped through the
+    finding's analysis run, so an id from an older run still resolves)."""
+    repository = _repository_or_404(db, repository_id, current_user)
+    issue = db.execute(
+        select(DebtIssue)
+        .join(AnalysisRun, AnalysisRun.id == DebtIssue.analysis_run_id)
+        .where(DebtIssue.id == issue_id, AnalysisRun.repository_id == repository.id)
+    ).scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found")
+
+    return DebtRecommendationRead(
+        issue_id=issue.id,
+        recommendation=debt_insight_service.get_or_generate_recommendation(db, issue=issue),
+    )

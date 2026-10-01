@@ -48,6 +48,11 @@ class DebtIssue(Base):
     module: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     metric_value: Mapped[float] = mapped_column(Float, nullable=False)
+    # Phase 10.4: lazily generated + cached on first view of the finding (never
+    # eagerly during analysis). NULL = not generated yet, or the last attempt
+    # failed (failures are never persisted, so they are retried on the next view).
+    # A re-analysis creates fresh rows, so a new run starts unset.
+    ai_recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

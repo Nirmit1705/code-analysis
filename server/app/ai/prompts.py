@@ -445,3 +445,66 @@ def build_insights_prompt(
     system = f"{_GROUNDING_PREAMBLE}\n\n{_INSIGHTS_TASK_INSTRUCTION}"
     messages = [{"role": "user", "content": f"Repository facts:\n\n{facts}"}]
     return system, messages, _INSIGHTS_RESPONSE_SCHEMA
+
+
+# --- Debt recommendation (Phase 10.4) -------------------------------------------
+
+
+class DebtRecommendationInput(Protocol):
+    """One technical-debt finding plus whatever real code was found for it.
+    `excerpts` are the finding's own file's already-persisted `RagChunk` rows
+    (gathered, ordered and capped by `debt_insight_service.py`); empty for a
+    module-level finding or a file with no chunks."""
+
+    category: str
+    severity: str
+    metric_value: float
+    description: str
+    file_path: str | None
+    module: str | None
+    excerpts: list[FileChunkSummary]
+
+
+_DEBT_TASK_INSTRUCTION = (
+    "You are advising a developer on ONE technical-debt finding found by a rule-based analyzer. Below are "
+    "the finding (its category, severity, the measured value and the analyzer's own sentence), where it is, "
+    "and — when available — excerpts of that file's real code. Write 2 to 4 sentences of plain prose (no "
+    "markdown, no bullet points, no headings) recommending a concrete first step to reduce this specific "
+    "debt. Rules: base the advice only on the finding and the excerpts; name a function, class or file only "
+    "if it appears in the facts or excerpts; never invent line numbers, names or behaviour you were not "
+    "shown; do not give generic advice (such as 'write more tests' or 'refactor') unless you tie it to "
+    "something shown. If no code excerpts are provided, say plainly that you are advising from the finding "
+    "alone and keep the advice to what that finding supports. Never claim a change is safe, quick or "
+    "low risk: absence of information is not evidence."
+)
+
+_DEBT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"recommendation": {"type": "string"}},
+    "required": ["recommendation"],
+    "additionalProperties": False,
+}
+
+
+def build_debt_recommendation_prompt(facts: DebtRecommendationInput) -> tuple[str, list[dict], dict]:
+    """Builds the per-finding recommendation prompt. Same shared grounding
+    preamble as every other prompt here; formats only, never queries."""
+    lines = [
+        f"Category: {facts.category}",
+        f"Severity: {facts.severity}",
+        f"Measured value: {facts.metric_value:g}",
+        f"Analyzer's finding: {facts.description}",
+        f"File: {facts.file_path}" if facts.file_path else "File: (a module- or repository-level finding, not one file)",
+    ]
+    if facts.module:
+        lines.append(f"Module: {facts.module}")
+
+    if facts.excerpts:
+        blocks = [f"[{c.chunk_type}] lines {c.line_start}-{c.line_end}\n{c.chunk_text}" for c in facts.excerpts]
+        lines.append("\nExcerpts of the file's real code:\n\n" + "\n\n---\n\n".join(blocks))
+    else:
+        lines.append("\nNo code excerpts are available for this finding.")
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_DEBT_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": "Technical debt finding:\n" + "\n".join(lines)}]
+    return system, messages, _DEBT_RESPONSE_SCHEMA

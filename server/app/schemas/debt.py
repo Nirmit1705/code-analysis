@@ -121,3 +121,14 @@ class DebtRead(BaseModel):
     # (last `MAX_TREND_POINTS`). Same branch rule as the History screen.
     trend_branch: str | None = None
     trend: list[DebtTrendPoint] = []
+
+
+class DebtRecommendationRead(BaseModel):
+    """`GET /repos/{id}/debt/issues/{issue_id}/recommendation` (Phase 10.4).
+    `recommendation` is `None` when the model call failed or returned nothing
+    usable — never an error, so the screen degrades to a calm "couldn't
+    generate" line with a Retry. Generated lazily on first view and then cached
+    on the finding; a failure is never cached."""
+
+    issue_id: uuid.UUID
+    recommendation: str | None = None
