@@ -508,3 +508,83 @@ def build_debt_recommendation_prompt(facts: DebtRecommendationInput) -> tuple[st
     system = f"{_GROUNDING_PREAMBLE}\n\n{_DEBT_TASK_INSTRUCTION}"
     messages = [{"role": "user", "content": "Technical debt finding:\n" + "\n".join(lines)}]
     return system, messages, _DEBT_RESPONSE_SCHEMA
+
+
+# --- Flow tracer notes (Phase 10.6) ----------------------------------------------
+
+
+class TraceNoteHop(Protocol):
+    """One file on a traced request path, with only the facts the tracer
+    already computed (`services/trace_narrative_service.py` builds these,
+    pre-capped). `external_services` are rendered strings such as
+    "PostgreSQL (via config/database.ts)"."""
+
+    index: int
+    layer: str
+    file_path: str
+    symbols: list[str]
+    imports: list[str]
+    external_services: list[str]
+
+
+class TraceNotesInput(Protocol):
+    start_label: str
+    handler: str | None
+    hops: list[TraceNoteHop]
+    truncated: bool
+
+
+_TRACE_NOTES_TASK_INSTRUCTION = (
+    "You are annotating a request-flow trace through a codebase for a developer. The trace was computed "
+    "from file imports: starting at one file, it lists the files a request is expected to pass through, "
+    "outermost layer first. For each file you are given its index, a layer label (assigned from folder and "
+    "filename naming conventions, so it is a guess, not a verified role), the functions or classes declared "
+    "in it, the files it imports, and any named external service (database, cache, SaaS SDK) it reaches. "
+    "Write exactly ONE short plain-prose sentence (at most 25 words, no markdown) per file saying what role "
+    "that file plays in the flow. Rules: use only the facts given; infer a role only from the file name, "
+    "layer label, declared names and imports shown, and say 'appears to' when you are inferring; the trace "
+    "knows which files import which, NOT which functions are called or what data moves, so never state what "
+    "a function does, which function is called, or what is passed between files; never say a file validates, "
+    "authenticates, sanitises, caches or similar unless its name or a declared name says so; do not mention "
+    "index numbers or the word 'hop'. Return one note for every index given, using that index. Absence of "
+    "information is not evidence: if a file's name and contents give you little, say so briefly."
+)
+
+_TRACE_NOTES_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "notes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"index": {"type": "integer"}, "note": {"type": "string"}},
+                "required": ["index", "note"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["notes"],
+    "additionalProperties": False,
+}
+
+
+def build_trace_notes_prompt(facts: TraceNotesInput) -> tuple[str, list[dict], dict]:
+    """Builds the batched per-file notes prompt for one trace. Same shared
+    grounding preamble as every other prompt here; formats only, never queries."""
+    lines = [f"Trace start: {facts.start_label}"]
+    if facts.handler:
+        lines.append(f"The route's handler (named in the route declaration): {facts.handler}")
+    if facts.truncated:
+        lines.append("The trace was cut off by a size limit, so more files may exist downstream.")
+
+    for hop in facts.hops:
+        lines.append(f"\n[{hop.index}] {hop.file_path}")
+        lines.append(f"  layer label: {hop.layer}")
+        lines.append("  declares: " + (", ".join(hop.symbols) if hop.symbols else "nothing recorded"))
+        lines.append("  imports: " + (", ".join(hop.imports) if hop.imports else "no other files"))
+        if hop.external_services:
+            lines.append("  external services: " + ", ".join(hop.external_services))
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_TRACE_NOTES_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": "Trace facts:\n" + "\n".join(lines)}]
+    return system, messages, _TRACE_NOTES_RESPONSE_SCHEMA
