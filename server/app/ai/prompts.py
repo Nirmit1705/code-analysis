@@ -588,3 +588,115 @@ def build_trace_notes_prompt(facts: TraceNotesInput) -> tuple[str, list[dict], d
     system = f"{_GROUNDING_PREAMBLE}\n\n{_TRACE_NOTES_TASK_INSTRUCTION}"
     messages = [{"role": "user", "content": "Trace facts:\n" + "\n".join(lines)}]
     return system, messages, _TRACE_NOTES_RESPONSE_SCHEMA
+
+
+# --- Generated documentation (Phase 10.8) ----------------------------------------
+
+
+class ReadmeSummaryInput(Protocol):
+    """The README the Overview paragraph is grounded in. `readme_text` is the
+    README's own already-persisted chunks joined in order and capped by
+    `documentation_service.py`; `readme_path` is where it lives (a README in a
+    sub-folder describes that part of the repository, not necessarily all of it)."""
+
+    readme_path: str
+    readme_text: str
+
+
+_README_TASK_INSTRUCTION = (
+    "You are writing the opening paragraph of a repository's generated overview. Below is the text of one "
+    "README file from the repository. Write 2 to 4 sentences of plain prose (no markdown, no bullet points, "
+    "no headings) saying what this README says the project, or the part of the project it sits in, is for "
+    "and what it covers. Rules: use only the README text; if the README only describes setup or commands "
+    "and never says what the project is for, say that this is all it covers rather than guessing a purpose; "
+    "a README inside a sub-folder describes that folder, so do not present it as describing the whole "
+    "repository; never invent features, technologies, names or numbers that are not in the text; do not "
+    "repeat install commands. Absence of information is not evidence."
+)
+
+_README_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
+    "additionalProperties": False,
+}
+
+
+def build_readme_summary_prompt(facts: ReadmeSummaryInput) -> tuple[str, list[dict], dict]:
+    """Builds the README-grounded overview paragraph prompt. Same shared
+    grounding preamble as every other prompt here; formats only, never queries."""
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_README_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": f"README file: {facts.readme_path}\n\n{facts.readme_text}"}]
+    return system, messages, _README_RESPONSE_SCHEMA
+
+
+class ModuleSummaryFacts(Protocol):
+    """One architecture component with only the facts the Architecture screen
+    already shows (`documentation_service.py` builds these, pre-capped)."""
+
+    id: str
+    label: str
+    kind: str
+    files: int
+    loc: int
+    key_files: list[str]
+    apis: list[str]
+    depends_on: list[str]
+    used_by: list[str]
+    circular_files: int
+
+
+class ModuleSummariesInput(Protocol):
+    modules: list[ModuleSummaryFacts]
+
+
+_MODULES_TASK_INSTRUCTION = (
+    "You are writing one-line descriptions of the components of a software system for its generated "
+    "documentation. Below is a list of components; for each you are given an id, a label, a kind, its size, "
+    "its main files, the API endpoints it defines, the components it depends on and the components that "
+    "depend on it. Write exactly ONE sentence of at most 30 words, plain prose with no markdown, for every "
+    "component, saying what role it appears to play in the system. Rules: use only the facts given; infer a "
+    "role only from the label, file names, endpoints and relationships shown, and say 'appears to' when you "
+    "are inferring; you have not seen any code, so never describe what a function does or what data moves; "
+    "never call a component healthy, well designed or safe; say plainly when the names give you little to go "
+    "on. Return one entry for every component, using its id exactly as given."
+)
+
+_MODULES_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "modules": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "summary": {"type": "string"}},
+                "required": ["id", "summary"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["modules"],
+    "additionalProperties": False,
+}
+
+
+def build_module_summaries_prompt(facts: ModuleSummariesInput) -> tuple[str, list[dict], dict]:
+    """Builds the batched per-component one-liner prompt: one call for every
+    component of the repository. Formats only, never queries."""
+    lines: list[str] = []
+    for m in facts.modules:
+        lines.append(f"\n[{m.id}] {m.label}")
+        lines.append(f"  kind: {m.kind}; {m.files} files, {m.loc} lines of code")
+        lines.append("  main files: " + (", ".join(m.key_files) if m.key_files else "none"))
+        # A component can define dozens of endpoints; a handful is enough to say what it is for.
+        shown_apis = m.apis[:6]
+        extra = f" (+{len(m.apis) - len(shown_apis)} more)" if len(m.apis) > len(shown_apis) else ""
+        lines.append("  API endpoints: " + (", ".join(shown_apis) + extra if shown_apis else "none"))
+        lines.append("  depends on: " + (", ".join(m.depends_on) if m.depends_on else "nothing recorded"))
+        lines.append("  used by: " + (", ".join(m.used_by) if m.used_by else "nothing recorded"))
+        if m.circular_files:
+            lines.append(f"  {m.circular_files} of its files sit in a circular dependency")
+
+    system = f"{_GROUNDING_PREAMBLE}\n\n{_MODULES_TASK_INSTRUCTION}"
+    messages = [{"role": "user", "content": "Components:\n" + "\n".join(lines)}]
+    return system, messages, _MODULES_RESPONSE_SCHEMA
