@@ -369,10 +369,17 @@ function EndpointDetail({ repositoryId, ep }: { repositoryId: string; ep: ApiEnd
         <div className="flex flex-wrap items-center gap-3 p-4">
           <MethodBadge method={ep.method} large />
           <PathWithParams path={ep.path} />
-          <span className="ml-auto flex items-center gap-1.5">
+          <span className="ml-auto flex flex-wrap items-center gap-1.5">
             {ep.change === "new" ? <Tag tone="success" caps>new</Tag> : null}
             <Tag tone="violet">{ep.service}</Tag>
             <Tag mono>{FRAMEWORK_LABEL[ep.framework]}</Tag>
+            <Link
+              to="/app/tracer"
+              search={{ endpoint: `${ep.method} ${ep.path}` }}
+              className="focus-ring inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[12px] text-violet-soft hover:border-border-strong hover:bg-surface-2"
+            >
+              Trace flow <ArrowRight className="size-3" />
+            </Link>
           </span>
         </div>
       </Panel>
