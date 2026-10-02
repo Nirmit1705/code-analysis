@@ -48,7 +48,7 @@ const nav = [
   {
     section: "Analysis",
     items: [
-      { to: "/app/tracer", label: "Feature Tracer", icon: Footprints },
+      { to: "/app/tracer", label: "Flow Tracer", icon: Footprints },
       { to: "/app/impact", label: "Impact Analysis", icon: Radar },
       { to: "/app/debt", label: "Technical Debt", icon: HandCoins },
       { to: "/app/compare", label: "Compare", icon: FileDiff },
@@ -201,12 +201,13 @@ export function SideNav() {
       data-side-nav
       className={cn(
         // Outer shell: a raised capsule. Its 5px padding is the visible bezel; the
-        // recessed track below sits inside it. The shell is lit from the top (a
-        // light-to-dark vertical gradient) and floats on a layered drop shadow: a
+        // recessed track below sits inside it. The shell's frame is lighter at both
+        // the top and the bottom and darker through the middle (a vertical
+        // gradient), and floats on a layered drop shadow: a
         // tight contact shadow plus a wide, soft one underneath. Width, rim
         // highlight and shadows live here. It never scrolls — the inner track
         // does — so the bezel stays put.
-        "group/nav fixed top-[3.75rem] bottom-4 left-3 z-30 hidden rounded-[30px] bg-gradient-to-b from-surface-3/90 to-surface-2/60 p-[5px] ring-1 ring-white/[0.07] backdrop-blur-xl transition-[width] duration-200 ease-out lg:block",
+        "group/nav fixed top-[3.75rem] bottom-4 left-3 z-30 hidden rounded-[30px] bg-gradient-to-b from-surface-3/90 via-surface-2/60 to-surface-3/90 p-[5px] ring-1 ring-white/[0.07] backdrop-blur-xl transition-[width] duration-200 ease-out lg:block",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.5),0_3px_8px_rgba(0,0,0,0.5),0_28px_56px_-14px_rgba(0,0,0,0.95)]",
         NAV_COLLAPSED,
         NAV_EXPANDED,
