@@ -188,7 +188,10 @@ function OnboardingPath({ data, repositoryId, repoName }: { data: OnboardingRead
       <header className="flex flex-wrap items-end gap-x-10 gap-y-4 pt-2">
         <div className="min-w-0">
           <h1 className="text-[28px] leading-[1.1] font-semibold tracking-[-0.025em] text-balance">
-            Find your way around {repoName}
+            Find your way around{" "}
+            <code className="rounded-[10px] bg-violet/12 px-[0.2em] font-mono text-[0.86em] font-semibold tracking-[-0.03em] text-violet-soft">
+              {repoName}
+            </code>
           </h1>
           <p className="mt-2 max-w-[60ch] text-[12.5px] text-muted-foreground">
             A reading order through the codebase, foundations first. Each step comes after the parts of the code it

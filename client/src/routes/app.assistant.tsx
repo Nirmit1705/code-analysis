@@ -23,6 +23,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
 
 import { ApiError } from "@/lib/api";
 import { useActiveRepositoryId } from "@/lib/active-repo";
@@ -35,7 +36,12 @@ import { completedRuns, useAnalysisRuns } from "@/lib/queries/history";
 import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
+// `?q=` asks that question once on arrival (used by the Overview's suggested
+// questions), then is removed from the URL.
+const searchSchema = z.object({ q: z.string().optional() });
+
 export const Route = createFileRoute("/app/assistant")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "AI Codebase Assistant — CodeLens AI" },
@@ -666,6 +672,9 @@ function Assistant() {
   const counter = useRef(0);
 
   const questions = suggested.data?.questions ?? [];
+  const { q: incomingQuestion } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const askedIncoming = useRef(false);
   const latestTurn = turns[turns.length - 1] ?? null;
   const focusedTurn = turns.find((t) => t.id === focusId) ?? latestTurn;
   const busy = sendMessage.isPending;
@@ -725,6 +734,14 @@ function Assistant() {
       });
     }
   };
+
+  // A ref, not state: React's dev double-mount would otherwise ask twice.
+  useEffect(() => {
+    if (!incomingQuestion || askedIncoming.current || !activeRepositoryId || needsAnalysis || runsQuery.isLoading) return;
+    askedIncoming.current = true;
+    void navigate({ search: {}, replace: true });
+    void ask(incomingQuestion);
+  }, [incomingQuestion, activeRepositoryId, needsAnalysis, runsQuery.isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const editQuestion = (question: string) => {
     setInput(question);
