@@ -28,7 +28,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "AI-powered codebase intelligence: architecture graphs, dependency analysis, feature tracing, impact analysis and generated documentation for any GitHub repository.",
+          "AI-powered codebase intelligence: architecture graphs, dependency analysis, feature tracing and impact analysis for any GitHub repository.",
       },
       { property: "og:title", content: "CodeLens AI — Understand Any Codebase. Instantly." },
       {
@@ -48,7 +48,7 @@ const capabilities = [
   { icon: RouteIcon, title: "Feature Tracing", body: "Follow any feature from UI event to database write across every service it touches." },
   { icon: Target, title: "Impact Analysis", body: "Select a file, function or endpoint and see exactly what breaks downstream before you ship." },
   { icon: AlertTriangle, title: "Technical Debt", body: "Scored, prioritized and explained — duplication, complexity, cycles and doc gaps over time." },
-  { icon: BookOpen, title: "Automated Documentation", body: "An engineering wiki and API reference generated from the code, not from stale markdown." },
+  { icon: BookOpen, title: "Automated Documentation", body: "Coming soon: an engineering wiki generated from the code, not from stale markdown." },
   { icon: GraduationCap, title: "Developer Onboarding", body: "A repository-specific learning path that gets a new engineer to first commit in days." },
 ];
 
@@ -69,7 +69,7 @@ const steps = [
   { n: "01", title: "Connect Repository", body: "Authorize GitHub and pick a repository and branch. Read-only access, no code stored." },
   { n: "02", title: "Analyze Codebase", body: "Files indexed, structure detected, dependencies extracted and symbols resolved across languages." },
   { n: "03", title: "Build Intelligence", body: "Architecture graph, embeddings, API surface and debt model constructed for the branch." },
-  { n: "04", title: "Understand & Improve", body: "Explore, ask, trace, measure impact and generate documentation your team actually trusts." },
+  { n: "04", title: "Understand & Improve", body: "Explore, ask, trace and measure impact, with a trustworthy view of the code your team actually has." },
 ];
 
 const heroMiniNodes = [

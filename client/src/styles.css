@@ -239,6 +239,42 @@
   animation: dash-flow 1.1s linear infinite;
 }
 
+/* One-shot sequence on the Documentation "coming soon" screen. The resting
+ * styles are the finished state; the animations only play the way in, so
+ * reduced-motion users (animation: none) see the finished picture. Each row
+ * sets --d, its start delay. */
+@keyframes seq-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes seq-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes seq-lit {
+  from {
+    border-left-color: var(--border);
+  }
+}
+.seq-grow {
+  animation: seq-grow 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0s) backwards;
+}
+.seq-fade {
+  animation: seq-fade 0.45s ease-out calc(var(--d, 0s) + 0.35s) backwards;
+}
+.seq-lit {
+  animation: seq-lit 0.4s ease-out var(--d, 0s) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .seq-grow,
+  .seq-fade,
+  .seq-lit {
+    animation: none;
+  }
+}
+
 /* Global type scale. The screens hardcode `text-[Npx]` (22 files), so instead of
  * touching each one this maps every size in use to its display size — roughly
  * +2.5px at body sizes over what is written in the markup (+1px over the

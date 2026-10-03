@@ -19,6 +19,7 @@ import {
   Github,
   History,
   Command,
+  type LucideIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
@@ -29,7 +30,17 @@ import { useActiveRepositoryId } from "@/lib/active-repo";
 import { useRepositories } from "@/lib/queries/repos";
 import { Dot, KeyHint } from "@/components/ui-kit";
 
-const nav = [
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  exact?: boolean;
+  accent?: boolean;
+  /** Not built yet: the page is a "coming soon" placeholder, flagged in the nav. */
+  soon?: boolean;
+};
+
+const nav: Array<{ section: string; items: NavItem[] }> = [
   {
     section: "Intelligence",
     items: [
@@ -58,7 +69,7 @@ const nav = [
   {
     section: "Knowledge",
     items: [
-      { to: "/app/documentation", label: "Documentation", icon: BookMarked },
+      { to: "/app/documentation", label: "Documentation", icon: BookMarked, soon: true },
       { to: "/app/api", label: "API Reference", icon: Webhook },
       { to: "/app/onboarding", label: "Onboarding", icon: Rocket },
     ],
@@ -255,7 +266,14 @@ export function SideNav() {
                             : "text-subtle group-hover:text-muted-foreground",
                         )}
                       />
-                      <span className={cn("truncate", reveal)}>{item.label}</span>
+                      <span className={cn("flex items-center gap-2 truncate", reveal)}>
+                        {item.label}
+                        {item.soon ? (
+                          <span className="rounded-full border border-violet/30 bg-violet/10 px-1.5 py-px text-[10px] font-medium tracking-wide text-violet-soft uppercase">
+                            Soon
+                          </span>
+                        ) : null}
+                      </span>
                       {item.accent && !active ? (
                         <span className="absolute top-[7px] left-[28px] size-1.5 rounded-full bg-violet/80 pulse-node" />
                       ) : null}

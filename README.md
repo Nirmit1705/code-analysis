@@ -95,7 +95,7 @@ The LLM is never the source of truth for something a parser or a graph algorithm
 | **Per-file AI Insight** | On-demand, LLM-generated purpose/explanation for any file, grounded only in that file's own indexed chunks |
 | **Live Analysis Progress** | A background pipeline (`QUEUED → CLONING → PARSING → ANALYZING → BUILDING_GRAPH → INDEXING → COMPLETED`) streamed to the browser over WebSocket |
 
-A few dashboard sections shown on the marketing page (Feature Tracer, generated Documentation, API Reference) are still front-end concepts pending their backend phase — see [Project status](#project-status).
+A few dashboard sections shown on the marketing page (Feature Tracer, API Reference) are still front-end concepts pending their backend phase; generated Documentation is **coming soon** (the screen is a placeholder) — see [Project status](#project-status).
 
 ## Tech stack
 
@@ -191,7 +191,7 @@ CodeLens AI is built in phases, each with an explicit backend build-out followed
 | 8 | AI Assistant + generated insights | ✅ Complete |
 | 9 | Change intelligence (Compare, Impact analysis, webhook re-analysis, History) | 🚧 In progress |
 
-Screens not yet listed above (Feature Tracer, Technical Debt, generated Documentation, API Reference, general Settings) still render illustrative sample data pending their turn in the roadmap.
+Screens not yet listed above (Feature Tracer, Technical Debt, API Reference, general Settings) still render illustrative sample data pending their turn in the roadmap. Generated Documentation is paused and shows a "coming soon" screen.
 
 ## License
 
