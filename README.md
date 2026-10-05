@@ -192,7 +192,3 @@ CodeLens AI is built in phases, each with an explicit backend build-out followed
 | 9 | Change intelligence (Compare, Impact analysis, webhook re-analysis, History) | 🚧 In progress |
 
 Screens not yet listed above (Feature Tracer, Technical Debt, API Reference, general Settings) still render illustrative sample data pending their turn in the roadmap. Generated Documentation is paused and shows a "coming soon" screen.
-
-## License
-
-No license has been published for this repository yet.
