@@ -67,6 +67,14 @@ async function tryRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/** Only from screens that need a session (`/app/*`, `/onboarding`); the
+ * sign-in pages themselves and the landing page are left alone. */
+function redirectToSignIn(): void {
+  if (typeof window === "undefined") return;
+  const path = window.location.pathname;
+  if (path === "/app" || path.startsWith("/app/") || path === "/onboarding") window.location.replace("/login");
+}
+
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
   /** Skip attaching the Authorization header (e.g. register/login themselves). */
@@ -99,6 +107,14 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     } else {
       clearTokens();
     }
+  }
+
+  // Still refused after any refresh: the session is over (expired, or logged
+  // out — possibly from another device). Signed-in screens send the user to
+  // sign in again rather than showing a page of "failed to load" errors.
+  if (response.status === 401 && auth) {
+    clearTokens();
+    redirectToSignIn();
   }
 
   if (!response.ok) {

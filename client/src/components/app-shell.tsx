@@ -27,6 +27,7 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { PRODUCT } from "@/lib/repo-data";
 import { useActiveRepositoryId } from "@/lib/active-repo";
+import { useMe } from "@/lib/queries/auth";
 import { useRepositories } from "@/lib/queries/repos";
 import { Dot, KeyHint } from "@/components/ui-kit";
 
@@ -104,6 +105,15 @@ function Logo() {
   );
 }
 
+/** Two letters for the avatar from the email's local part: "m.okafor" -> "mo",
+ * "john" -> "jo". */
+function initials(email: string | undefined): string {
+  if (!email) return "";
+  const local = email.split("@")[0] ?? "";
+  const words = local.split(/[._-]+/).filter(Boolean);
+  return words.length >= 2 ? `${words[0]![0]}${words[1]![0]}` : local.slice(0, 2);
+}
+
 export function TopBar() {
   const [open, setOpen] = useState(false);
   const activeRepositoryId = useActiveRepositoryId();
@@ -118,6 +128,7 @@ export function TopBar() {
       })
     : "not yet analyzed";
   const githubConnected = (repositories.data?.length ?? 0) > 0;
+  const me = useMe();
 
   return (
     <header className="sticky top-0 z-40 flex h-12 items-center gap-3 border-b border-border bg-background/85 px-3 backdrop-blur-xl">
@@ -179,12 +190,16 @@ export function TopBar() {
             Analyzed {lastAnalyzedLabel}
           </span>
         ) : null}
-        <button className="focus-ring flex items-center gap-2 rounded-md border border-border bg-surface py-1 pr-2 pl-1 hover:border-border-strong">
-          <span className="grid size-5 place-items-center rounded-[4px] bg-violet/20 font-mono text-[10px] text-violet-soft">
-            MO
+        <Link
+          to="/app/settings"
+          title={me.data?.email ?? "Your account"}
+          className="focus-ring flex items-center gap-2 rounded-md border border-border bg-surface py-1 pr-2 pl-1 hover:border-border-strong"
+        >
+          <span className="grid size-5 place-items-center rounded-[4px] bg-violet/20 font-mono text-[10px] text-violet-soft uppercase">
+            {initials(me.data?.email)}
           </span>
-          <span className="text-[12px]">m.okafor</span>
-        </button>
+          <span className="hidden max-w-[16ch] truncate text-[12px] sm:inline">{me.data ? me.data.email.split("@")[0] : "Account"}</span>
+        </Link>
       </div>
     </header>
   );

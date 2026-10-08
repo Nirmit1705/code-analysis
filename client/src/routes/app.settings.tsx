@@ -1,217 +1,155 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { User, Users, CreditCard, KeyRound, Bell } from "lucide-react";
+import { LogOut } from "lucide-react";
 
-import { Panel, PanelHeader, ScoreBar, Tag } from "@/components/ui-kit";
+import { Panel } from "@/components/ui-kit";
+import { endSession, forgetSession, useMe } from "@/lib/queries/auth";
+import { useRepositories } from "@/lib/queries/repos";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/settings")({
   head: () => ({
     meta: [
       { title: "Profile & Settings — CodeLens AI" },
-      { name: "description", content: "Manage your profile, team members, notification rules, API tokens and workspace plan usage." },
+      { name: "description", content: "Your CodeLens AI account: the email you sign in with and the repositories you have connected." },
       { property: "og:title", content: "Profile & Settings — CodeLens AI" },
-      { property: "og:description", content: "Workspace, team and billing configuration for CodeLens AI." },
+      { property: "og:description", content: "Your CodeLens AI account." },
     ],
   }),
   component: SettingsPage,
 });
 
-const tabs = [
-  { id: "profile", label: "Profile", icon: User },
-  { id: "team", label: "Team", icon: Users },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "tokens", label: "API tokens", icon: KeyRound },
-  { id: "billing", label: "Plan & usage", icon: CreditCard },
-];
-
-const team = [
-  { name: "Maya Okafor", email: "maya@hiresight.io", role: "Owner", last: "active now" },
-  { name: "Dmitri Aleksandrov", email: "dmitri@hiresight.io", role: "Admin", last: "2 hours ago" },
-  { name: "Sarah Chen", email: "sarah@hiresight.io", role: "Member", last: "yesterday" },
-  { name: "Tomás Vieira", email: "tomas@hiresight.io", role: "Member", last: "3 days ago" },
-  { name: "Priya Raghavan", email: "priya@hiresight.io", role: "Viewer", last: "1 week ago" },
-];
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 function SettingsPage() {
-  const [tab, setTab] = useState("profile");
+  const me = useMe();
+  const repositories = useRepositories();
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-4">
-      <div>
-        <h1 className="text-[17px] font-semibold tracking-tight">Profile & Settings</h1>
-        <p className="text-[12px] text-muted-foreground">Workspace: HireSight Engineering</p>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "focus-ring flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px]",
-              tab === t.id ? "border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)]" : "border-border text-muted-foreground hover:border-border-strong",
-            )}
-          >
-            <t.icon className="size-3.5" /> {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "profile" ? (
-        <Panel>
-          <PanelHeader title="Your profile" subtitle="Signed in with GitHub" />
-          <div className="grid gap-4 p-4 sm:grid-cols-2">
-            <Field label="Full name" value="Maya Okafor" />
-            <Field label="Email" value="maya@hiresight.io" />
-            <Field label="GitHub handle" value="m-okafor" mono />
-            <Field label="Role" value="Owner" />
-          </div>
-        </Panel>
-      ) : null}
-
-      {tab === "team" ? (
-        <Panel>
-          <PanelHeader title="Team members" subtitle="5 of 10 seats used" actions={<Tag tone="violet">Invite</Tag>} />
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-border">
-                {["Member", "Email", "Role", "Last active"].map((h) => (
-                  <th key={h} className="label-xs px-4 py-2 font-medium">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {team.map((m) => (
-                <tr key={m.email} className="hover:bg-surface-2/60">
-                  <td className="px-4 py-2.5 text-[12.5px]">{m.name}</td>
-                  <td className="px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.email}</td>
-                  <td className="px-4 py-2.5"><Tag tone={m.role === "Owner" ? "violet" : "neutral"}>{m.role}</Tag></td>
-                  <td className="px-4 py-2.5 text-[11.5px] text-subtle">{m.last}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-      ) : null}
-
-      {tab === "notifications" ? (
-        <Panel>
-          <PanelHeader title="Notification rules" subtitle="delivered to Slack #eng-health and email" />
-          <ul className="divide-y divide-border">
-            {[
-              ["Critical debt introduced", "Notify when a merge raises the debt score by 5 or more", true],
-              ["New circular dependency", "Notify on any newly closed cycle", true],
-              ["CVE detected in dependencies", "Notify on high or critical advisories", true],
-              ["Weekly architecture digest", "Monday 09:00 summary of score movement", true],
-              ["Analysis completed", "Every successful run on a tracked branch", false],
-            ].map(([title, sub, on]) => (
-              <li key={title as string} className="flex items-center gap-3 px-4 py-3">
-                <div>
-                  <p className="text-[12.5px]">{title}</p>
-                  <p className="text-[11.5px] text-subtle">{sub}</p>
-                </div>
-                <Toggle initial={on as boolean} />
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      ) : null}
-
-      {tab === "tokens" ? (
-        <Panel>
-          <PanelHeader title="API tokens" subtitle="use these in CI to gate merges on architecture checks" />
-          <ul className="divide-y divide-border">
-            {[
-              ["ci-github-actions", "sbst_live_••••••••7f2a", "created Jul 2, 2026", "used 4 minutes ago"],
-              ["local-cli-maya", "sbst_live_••••••••b19c", "created May 18, 2026", "used yesterday"],
-            ].map(([name, key, created, used]) => (
-              <li key={name} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <span className="text-[12.5px]">{name}</span>
-                <span className="font-mono text-[11.5px] text-muted-foreground">{key}</span>
-                <span className="ml-auto text-[11px] text-subtle">{created} · {used}</span>
-                <button className="focus-ring rounded-md border border-danger/30 bg-danger/10 px-2 py-1 text-[11.5px] text-danger">
-                  Revoke
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      ) : null}
-
-      {tab === "billing" ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <Panel ambient>
-            <PanelHeader title="Current plan" subtitle="Team · billed annually" actions={<Tag tone="violet" caps>active</Tag>} />
-            <div className="space-y-3 p-4">
-              <p className="font-mono text-[22px]">$49<span className="text-[12px] text-subtle"> / developer / month</span></p>
-              <ul className="space-y-1.5 text-[12px] text-muted-foreground">
-                {["Unlimited private repositories", "10 seats included", "Repository-aware AI assistant", "CI architecture gates"].map((f) => (
-                  <li key={f} className="flex gap-2">
-                    <span className="mt-[7px] size-1 shrink-0 rounded-full bg-violet" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+    <div className="mx-auto max-w-[1280px] p-4 pb-16">
+      {me.isLoading ? (
+        <Message>Loading your account…</Message>
+      ) : me.isError || !me.data ? (
+        <Message danger>Failed to load your account.</Message>
+      ) : (
+        <div className="grid max-w-[760px] gap-[18px] pt-3">
+          <header className="mb-2 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+            <div className="min-w-0">
+              <h1 className="text-[28px] leading-[1.1] font-semibold tracking-[-0.028em]">Your account</h1>
+              <p className="mt-2.5 text-[11px] break-words text-muted-foreground">Signed in as {me.data.email}.</p>
             </div>
-          </Panel>
-          <Panel>
-            <PanelHeader title="Usage this cycle" subtitle="resets Sep 1, 2026" />
-            <div className="space-y-4 p-4">
-              {[
-                ["Analyses", 412, 1000],
-                ["Assistant messages", 2860, 5000],
-                ["Indexed files", 3184, 10000],
-              ].map(([label, used, total]) => (
-                <div key={label as string}>
-                  <div className="mb-1.5 flex items-baseline text-[12px]">
-                    <span>{label}</span>
-                    <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">
-                      {(used as number).toLocaleString()} / {(total as number).toLocaleString()}
-                    </span>
-                  </div>
-                  <ScoreBar value={((used as number) / (total as number)) * 100} />
-                </div>
+            <LogOutButton />
+          </header>
+
+          <section aria-labelledby="account-title" className="rounded-[14px] border border-border bg-surface px-[22px] pt-5 pb-[22px]">
+            <h2 id="account-title" className="text-[14.5px] font-semibold tracking-[-0.01em]">
+              Account
+            </h2>
+            <dl className="mt-3.5 grid">
+              <Row label="Email">{me.data.email}</Row>
+              <Row label="Member since">{day(me.data.created_at)}</Row>
+              <Row label="Repositories">
+                {repositories.isLoading ? (
+                  <span className="text-subtle">Loading…</span>
+                ) : (repositories.data ?? []).length === 0 ? (
+                  <span>
+                    None yet.{" "}
+                    <Link to="/onboarding" className="focus-ring text-violet-soft hover:underline">
+                      Connect a repository
+                    </Link>
+                  </span>
+                ) : (
+                  <span>
+                    {(repositories.data ?? []).map((r, i) => (
+                      <span key={r.id}>
+                        {i > 0 ? ", " : null}
+                        <span className="font-mono text-[11px]">{r.full_name}</span>
+                      </span>
+                    ))}
+                    <small className="mt-0.5 block text-[10px] text-subtle">
+                      Each repository's own settings are on the{" "}
+                      <Link to="/app/repository" className="focus-ring text-violet-soft hover:underline">
+                        Repository Settings
+                      </Link>{" "}
+                      screen.
+                    </small>
+                  </span>
+                )}
+              </Row>
+            </dl>
+          </section>
+
+          <section aria-labelledby="later-title" className="rounded-[14px] border border-border bg-surface px-[22px] pt-5 pb-[22px]">
+            <h2 id="later-title" className="text-[14.5px] font-semibold tracking-[-0.01em]">
+              Not in CodeLens AI yet
+            </h2>
+            <p className="mt-0.5 text-[10px] text-subtle">
+              These have no data behind them yet, so there's nothing to set. They'll appear here once they exist.
+            </p>
+            <div className="mt-3.5 flex flex-wrap gap-1.5">
+              {["Team members", "Notifications", "API tokens", "Plan and billing"].map((t) => (
+                <span key={t} className="rounded-full border border-dashed border-border-strong px-2.5 py-1 text-[10px] text-muted-foreground">
+                  {t}
+                </span>
               ))}
             </div>
-          </Panel>
+          </section>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Ends the session on the server, then forgets it here. If the server can't
+ * be reached the session is still alive there, so this says so and offers to
+ * log out on this device only instead of pretending it worked. */
+function LogOutButton() {
+  const [state, setState] = useState<"idle" | "pending" | "unreachable">("idle");
+
+  const logOut = async () => {
+    setState("pending");
+    if (await endSession()) forgetSession();
+    else setState("unreachable");
+  };
+
+  return (
+    <div className="grid justify-items-end gap-2">
+      <button
+        type="button"
+        onClick={() => void logOut()}
+        disabled={state === "pending"}
+        className="focus-ring flex items-center gap-1.5 rounded-lg border border-border-strong px-4 py-2 text-[11px] font-semibold text-secondary-foreground transition-colors hover:bg-surface-2 disabled:opacity-60"
+      >
+        <LogOut className="size-3.5" />
+        {state === "pending" ? "Logging out…" : "Log out"}
+      </button>
+      {state === "unreachable" ? (
+        <p role="alert" className="max-w-[40ch] text-right text-[10px] leading-relaxed text-danger">
+          Couldn't reach CodeLens AI, so your session is still active on the server.{" "}
+          <button type="button" onClick={forgetSession} className="focus-ring font-semibold underline">
+            Log out on this device only
+          </button>
+        </p>
       ) : null}
     </div>
   );
 }
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="label-xs">{label}</span>
-      <input
-        defaultValue={value}
-        className={cn(
-          "focus-ring mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-[12.5px] outline-none",
-          mono && "font-mono text-[12px]",
-        )}
-      />
-    </label>
+    <div className="grid grid-cols-1 gap-0.5 border-t border-border py-[11px] text-[12.5px] first:border-t-0 sm:grid-cols-[170px_minmax(0,1fr)] sm:gap-3.5">
+      <dt className="text-[11px] text-subtle">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </div>
   );
 }
 
-function Toggle({ initial }: { initial: boolean }) {
-  const [on, setOn] = useState(initial);
+function Message({ children, danger }: { children: React.ReactNode; danger?: boolean }) {
   return (
-    <button
-      onClick={() => setOn((v) => !v)}
-      className={cn(
-        "focus-ring ml-auto h-5 w-9 shrink-0 rounded-full border transition-colors",
-        on ? "border-violet/50 bg-violet/40" : "border-border bg-surface-2",
-      )}
-    >
-      <span
-        className={cn(
-          "block size-3.5 rounded-full bg-foreground/85 transition-transform",
-          on ? "translate-x-[19px]" : "translate-x-[3px]",
-        )}
-      />
-    </button>
+    <Panel>
+      <div className="p-10 text-center">
+        <p className={cn("text-[13px]", danger ? "text-danger" : "text-subtle")}>{children}</p>
+      </div>
+    </Panel>
   );
 }
