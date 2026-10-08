@@ -20,9 +20,9 @@ transiently read `COMPLETED` before that indexing stage has even started.
 
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.analysis.debt import analyze_technical_debt
@@ -36,7 +36,7 @@ from app.models.branch import Branch
 from app.models.debt_issue import DebtIssue
 from app.models.dependency import DependencyEdge as DependencyEdgeRow
 from app.models.file import File
-from app.models.repository import Repository, RepositoryAnalysisStatus
+from app.models.repository import AnalysisMode, Repository, RepositoryAnalysisStatus
 from app.models.symbol import Symbol as SymbolRow
 from app.models.user import User
 
@@ -664,3 +664,131 @@ def finalize_analysis_run_completed(db: Session, *, analysis_run: AnalysisRun, r
     db.commit()
     db.refresh(analysis_run)
     return analysis_run
+
+
+# --- Phase 10.11: repository settings, disconnect, purge -------------------------
+
+# A non-terminal run counts as "in flight" (blocking disconnect/purge with a
+# 409) only if it was created within this window. Older non-terminal rows are
+# treated as abandoned: a run whose enqueue silently failed, or whose worker
+# died, stays `QUEUED`/mid-stage forever (there is no heartbeat column), and
+# without a cutoff such a row would block disconnect/purge permanently. Two
+# hours is well beyond a normal analysis (HireSight: minutes).
+IN_FLIGHT_WINDOW = timedelta(hours=2)
+
+_TERMINAL_RUN_STATUSES = (AnalysisRunStatus.COMPLETED, AnalysisRunStatus.FAILED)
+
+
+class RunInFlightError(Exception):
+    """Raised by `delete_repository`/`purge_repository_runs` while a run is
+    live for the repository (the API turns it into a 409)."""
+
+    def __init__(self, analysis_run: AnalysisRun):
+        self.analysis_run = analysis_run
+        super().__init__(f"analysis run {analysis_run.id} is {analysis_run.status.value}")
+
+
+def get_in_flight_run(db: Session, repository_id: uuid.UUID, *, now: datetime | None = None) -> AnalysisRun | None:
+    """The newest non-terminal run created within `IN_FLIGHT_WINDOW`, or `None`."""
+    cutoff = (now or datetime.now(timezone.utc)) - IN_FLIGHT_WINDOW
+    return db.execute(
+        select(AnalysisRun)
+        .where(
+            AnalysisRun.repository_id == repository_id,
+            AnalysisRun.status.notin_(_TERMINAL_RUN_STATUSES),
+            AnalysisRun.created_at >= cutoff,
+        )
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def count_analysis_runs(db: Session, repository_id: uuid.UUID) -> int:
+    return db.execute(
+        select(func.count()).select_from(AnalysisRun).where(AnalysisRun.repository_id == repository_id)
+    ).scalar_one()
+
+
+def get_selected_branch(db: Session, repository_id: uuid.UUID) -> Branch | None:
+    return db.execute(
+        select(Branch).where(Branch.repository_id == repository_id, Branch.is_selected == True)  # noqa: E712
+    ).scalar_one_or_none()
+
+
+def _lock_repository_row(db: Session, repository_id: uuid.UUID) -> None:
+    """`SELECT ... FOR UPDATE` on the repository row, so two disconnect/purge
+    requests for one repository serialize (the in-flight check and the delete
+    then happen under the same lock). Released by the caller's commit/rollback."""
+    db.execute(select(Repository.id).where(Repository.id == repository_id).with_for_update())
+
+
+def update_repository_settings(
+    db: Session,
+    repository: Repository,
+    *,
+    analysis_mode: AnalysisMode | None = None,
+    ignore_patterns: list[str] | None = None,
+) -> Repository:
+    """Sets whichever of the two settings is given (`None` = leave unchanged).
+    `ignore_patterns` must already be normalised (the PATCH schema does it).
+    Takes effect from the next run: nothing already analyzed is touched."""
+    if analysis_mode is not None:
+        repository.analysis_mode = analysis_mode
+    if ignore_patterns is not None:
+        repository.ignore_patterns = list(ignore_patterns)
+    db.add(repository)
+    db.commit()
+    db.refresh(repository)
+    return repository
+
+
+def delete_repository(db: Session, repository: Repository) -> None:
+    """Disconnects a repository: deletes the `Repository` row, and Postgres
+    cascades (`ON DELETE CASCADE` on every child FK) remove its branches,
+    runs, files, symbols, edges, endpoints, debt findings, RAG chunks and
+    onboarding progress. Does *not* uninstall the GitHub App (that is the
+    user's GitHub-side action and may cover other repositories). Raises
+    `RunInFlightError` (nothing deleted) while a run is live."""
+    try:
+        _lock_repository_row(db, repository.id)
+        in_flight = get_in_flight_run(db, repository.id)
+        if in_flight is not None:
+            raise RunInFlightError(in_flight)
+        db.execute(delete(Repository).where(Repository.id == repository.id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def purge_repository_runs(
+    db: Session, repository: Repository, *, branch: str, commit_sha: str
+) -> tuple[AnalysisRun, int]:
+    """Deletes every `AnalysisRun` of the repository (cascading to all of its
+    facts and RAG chunks — History, trends and baselines are gone), resets
+    `last_analyzed_commit_sha`, and inserts one fresh `MANUAL` `QUEUED` run
+    for `branch`@`commit_sha` — all in one transaction (committed by
+    `create_queued_analysis_run`), so a failure leaves the old runs intact.
+    Branches, settings and onboarding ticks (keyed by component id, designed
+    to survive re-analysis) are kept. Raises `RunInFlightError` while a run is
+    live. Returns `(new_run, deleted_run_count)`; the caller enqueues the task."""
+    try:
+        _lock_repository_row(db, repository.id)
+        in_flight = get_in_flight_run(db, repository.id)
+        if in_flight is not None:
+            raise RunInFlightError(in_flight)
+        deleted = db.execute(delete(AnalysisRun).where(AnalysisRun.repository_id == repository.id)).rowcount
+        repository.last_analyzed_commit_sha = None
+        repository.analysis_status = RepositoryAnalysisStatus.NOT_ANALYZED
+        db.add(repository)
+        analysis_run = create_queued_analysis_run(
+            db,
+            repository_id=repository.id,
+            branch=branch,
+            commit_sha=commit_sha,
+            trigger_source=AnalysisRunTriggerSource.MANUAL,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    return analysis_run, deleted

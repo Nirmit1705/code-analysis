@@ -16,6 +16,7 @@ from app.api.v1 import (
     github,
     impact,
     onboarding,
+    repository_settings,
     tracer,
     webhooks,
 )
@@ -33,6 +34,7 @@ api_router.include_router(debt.router)
 api_router.include_router(api_reference.router)
 api_router.include_router(tracer.router)
 api_router.include_router(onboarding.router)
+api_router.include_router(repository_settings.router)
 api_router.include_router(assistant.router)
 api_router.include_router(compare.router)
 api_router.include_router(impact.router)

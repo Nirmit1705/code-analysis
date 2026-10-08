@@ -140,6 +140,14 @@ def get_installation(installation_id: str) -> dict[str, Any]:
     return _request("GET", f"/app/installations/{installation_id}", use_app_jwt=True).json()
 
 
+def get_repository_installation(owner: str, repo: str) -> dict[str, Any]:
+    """GET /repos/{owner}/{repo}/installation (App-JWT-authed) — this App's
+    installation covering that repository. Raises `GitHubServiceError(404)`
+    when the App is not installed on it (uninstalled, or the repository was
+    removed from the installation's selected repositories)."""
+    return _request("GET", f"/repos/{owner}/{repo}/installation", use_app_jwt=True).json()
+
+
 def get_installation_access_token(installation_id: str) -> dict[str, str]:
     """POST /app/installations/{id}/access_tokens — mints a short-lived
     (~1 hour) installation access token, authenticated with the App JWT.
