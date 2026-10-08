@@ -19,9 +19,8 @@ from app.api.deps import get_current_user, get_db
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.core.security import (
-    create_access_token,
     create_action_token,
-    create_refresh_token,
+    create_token_pair,
     decode_token,
     decrypt_token,
 )
@@ -169,10 +168,8 @@ def github_exchange(payload: GitHubExchangeRequest, db: Session = Depends(get_db
     if user is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired exchange code")
 
-    return TokenResponse(
-        access_token=create_access_token(subject=user.email),
-        refresh_token=create_refresh_token(subject=user.email),
-    )
+    access_token, refresh_token = create_token_pair(user.email)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 # --- Phase 2.4: repository & branch APIs -----------------------------------

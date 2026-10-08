@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
@@ -23,23 +24,54 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
-def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
+# A refresh token's lifetime, and so the longest any token of a session can
+# still be valid after it was minted. Also how long a logout's revocation row
+# must be kept (`auth_service.revoke_session`).
+REFRESH_TOKEN_LIFETIME = timedelta(days=7)
+
+
+def new_session_id() -> str:
+    """Identifies one sign-in. Stamped as `sid` on the access *and* refresh
+    token issued together, and kept by `/auth/refresh`, so logging out can
+    revoke the whole session at once."""
+    return uuid.uuid4().hex
+
+
+def create_access_token(subject: str, expires_delta: timedelta | None = None, *, sid: str | None = None) -> str:
+    """`sid` defaults to a fresh session (a standalone token, e.g. in the
+    smoke scripts); pass the session's id when issuing a pair."""
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    payload: dict[str, Any] = {"sub": subject, "exp": expire, "type": "access"}
+    payload: dict[str, Any] = {"sub": subject, "exp": expire, "type": "access", "sid": sid or new_session_id()}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(subject: str, expires_delta: timedelta | None = None) -> str:
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=7))
-    payload: dict[str, Any] = {"sub": subject, "exp": expire, "type": "refresh"}
+def create_refresh_token(subject: str, expires_delta: timedelta | None = None, *, sid: str | None = None) -> str:
+    expire = datetime.now(timezone.utc) + (expires_delta or REFRESH_TOKEN_LIFETIME)
+    payload: dict[str, Any] = {"sub": subject, "exp": expire, "type": "refresh", "sid": sid or new_session_id()}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_token_pair(subject: str, *, sid: str | None = None) -> tuple[str, str]:
+    """An access + refresh token of the same session (a new one unless `sid`
+    is given — `/auth/refresh` passes the existing one)."""
+    sid = sid or new_session_id()
+    return create_access_token(subject, sid=sid), create_refresh_token(subject, sid=sid)
 
 
 def decode_token(token: str) -> dict[str, Any]:
     """Raises jwt.PyJWTError (ExpiredSignatureError, InvalidTokenError, ...) on failure."""
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+
+
+def decode_token_ignoring_expiry(token: str) -> dict[str, Any]:
+    """Like `decode_token` (signature still verified) but accepts an expired
+    token — only for logout, which must be able to end the session behind an
+    expired access token. Never use it to authorize a request."""
+    return jwt.decode(
+        token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"verify_exp": False}
+    )
 
 
 def create_action_token(subject: str, action_type: str, expires_delta: timedelta = timedelta(minutes=10)) -> str:

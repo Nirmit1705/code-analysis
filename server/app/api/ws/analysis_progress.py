@@ -10,8 +10,8 @@ Phase 5.3's files are not modified by this module.
 Auth is a `?token=` query param, not the `Authorization` header
 `get_current_user` reads from HTTP requests — a real browser `WebSocket`
 constructor can't set arbitrary headers. The token is decoded with the exact
-same primitives (`core/security.py::decode_token`,
-`services/auth_service.py::get_user_by_email`) — this is the existing JWT
+same check (`services/auth_service.py::authenticate_token`,
+which also refuses a logged-out session) — this is the existing JWT
 scheme applied to a new transport, not a new auth mechanism. Every
 auth/ownership/not-found failure closes the socket with the same code (1008,
 WS "Policy Violation") — the WS equivalent of this codebase's established
@@ -31,15 +31,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.core.database import SessionLocal
 from app.core.redis import get_async_redis_client
-from app.core.security import decode_token
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus
 from app.schemas.analysis import AnalysisProgressEvent
-from app.services.auth_service import get_user_by_email
+from app.services.auth_service import authenticate_token
 from app.services.progress_service import progress_channel_name
 from app.services.repo_service import get_repository_for_user
 
@@ -93,22 +91,12 @@ async def analysis_progress_ws(
         if token is None:
             await websocket.close(code=_WS_POLICY_VIOLATION)
             return
-        try:
-            payload = decode_token(token)
-        except jwt.PyJWTError:
+        # Same check as the REST dependency, incl. a logged-out session.
+        authenticated = authenticate_token(db, token, "access")
+        if authenticated is None:
             await websocket.close(code=_WS_POLICY_VIOLATION)
             return
-        if payload.get("type") != "access":
-            await websocket.close(code=_WS_POLICY_VIOLATION)
-            return
-        email = payload.get("sub")
-        if not email:
-            await websocket.close(code=_WS_POLICY_VIOLATION)
-            return
-        user = get_user_by_email(db, email)
-        if user is None:
-            await websocket.close(code=_WS_POLICY_VIOLATION)
-            return
+        user = authenticated[0]
 
         try:
             run_uuid = uuid.UUID(analysis_run_id)

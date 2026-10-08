@@ -17,6 +17,13 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    """The refresh token is the one worth ending (it lives 7 days); optional so
+    a client that only still has its access token can log out too."""
+
+    refresh_token: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

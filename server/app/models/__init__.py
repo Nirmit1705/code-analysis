@@ -10,11 +10,13 @@ from app.models.file import File
 from app.models.onboarding_progress import OnboardingProgress
 from app.models.rag_chunk import RagChunk
 from app.models.repository import Repository, RepositoryAnalysisStatus
+from app.models.revoked_session import RevokedSession
 from app.models.symbol import Symbol
 from app.models.user import User
 
 __all__ = [
     "User",
+    "RevokedSession",
     "Repository",
     "RepositoryAnalysisStatus",
     "Branch",

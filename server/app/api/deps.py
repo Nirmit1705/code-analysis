@@ -2,15 +2,13 @@
 
 from collections.abc import Generator
 
-import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
-from app.core.security import decode_token
 from app.models.user import User
-from app.services.auth_service import get_user_by_email
+from app.services.auth_service import authenticate_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -35,20 +33,9 @@ def get_current_user(
     if credentials is None:
         raise unauthorized
 
-    try:
-        payload = decode_token(credentials.credentials)
-    except jwt.PyJWTError:
-        raise unauthorized from None
-
-    if payload.get("type") != "access":
+    # Signature, expiry, type, a session that hasn't been logged out, and an
+    # existing user — the same check `/auth/refresh` and the WebSocket use.
+    authenticated = authenticate_token(db, credentials.credentials, "access")
+    if authenticated is None:
         raise unauthorized
-
-    email = payload.get("sub")
-    if not email:
-        raise unauthorized
-
-    user = get_user_by_email(db, email)
-    if user is None:
-        raise unauthorized
-
-    return user
+    return authenticated[0]
