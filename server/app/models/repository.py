@@ -4,8 +4,8 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -27,6 +27,17 @@ class RepositoryAnalysisStatus(str, enum.Enum):
     ANALYZING = "analyzing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class AnalysisMode(str, enum.Enum):
+    """When a repository is re-analyzed without the user asking (Phase 10.11).
+    `ON_PUSH`: a GitHub `push` to the selected branch queues a run (the Phase
+    9.5 webhook). `MANUAL`: the webhook ignores pushes; runs only start from
+    the "Analyze" button. The manual endpoint works in both modes. Stored by
+    member *name* (`"ON_PUSH"`), like every other enum here (Known Issue #15)."""
+
+    ON_PUSH = "on_push"
+    MANUAL = "manual"
 
 
 class Repository(Base):
@@ -61,6 +72,22 @@ class Repository(Base):
         default=RepositoryAnalysisStatus.NOT_ANALYZED,
         server_default=RepositoryAnalysisStatus.NOT_ANALYZED.value,
         nullable=False,
+    )
+    # Phase 10.11. `server_default` is the member *name* — it backfills every
+    # pre-10.11 row, so a lowercase literal would make those rows unreadable
+    # (`LookupError`, Known Issue #15 / the 9.5 lesson).
+    analysis_mode: Mapped[AnalysisMode] = mapped_column(
+        Enum(AnalysisMode, native_enum=False, length=16),
+        default=AnalysisMode.ON_PUSH,
+        server_default=AnalysisMode.ON_PUSH.name,
+        nullable=False,
+    )
+    # Phase 10.11: the user's own ignore patterns, applied by the Celery task
+    # *on top of* `ingestion.DEFAULT_IGNORE_PATTERNS` (never instead of them)
+    # from the next run on. Already normalised and validated by
+    # `schemas/repository_settings.py` (`ingestion.normalize_ignore_patterns`).
+    ignore_patterns: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

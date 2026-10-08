@@ -67,6 +67,16 @@ _STAGE_NAME_TO_STATUS = {
 }
 
 
+def _ignore_patterns_for(repository: Repository) -> tuple[str, ...]:
+    """Phase 10.11: the built-in defaults plus the repository's own patterns —
+    additive, never a replacement for the defaults. Read when the run
+    *starts*, so a pattern saved after a run was queued still applies to it.
+    The stored list was already normalised by the settings schema; non-string
+    or blank entries (only possible through a direct DB write) are skipped."""
+    extra = tuple(p for p in (repository.ignore_patterns or []) if isinstance(p, str) and p.strip())
+    return ingestion.DEFAULT_IGNORE_PATTERNS + extra
+
+
 @celery_app.task(name="run_repository_analysis")
 def run_repository_analysis(analysis_run_id: str) -> dict:
     """Runs the Phase 3 analysis pipeline for `analysis_run_id` and persists
@@ -133,6 +143,7 @@ def run_repository_analysis(analysis_run_id: str) -> dict:
                 owner=repository.owner,
                 repo=repository.name,
                 commit_sha=analysis_run.commit_sha,
+                ignore_patterns=_ignore_patterns_for(repository),
             ) as ingestion_result:
                 result = pipeline.analyze_ingested(
                     ingestion_result, commit_sha=analysis_run.commit_sha, on_stage=_on_stage

@@ -51,6 +51,8 @@ DEFAULT_MAX_FILE_COUNT = 50_000
 # Matched against either the full relative path (glob) or, for a
 # slash-free pattern, against any individual path segment — so
 # "node_modules" ignores that directory no matter how deep it appears.
+# A pattern containing "/" is anchored at the repository root and also
+# matches everything inside a folder it names (see `_matches_ignore_patterns`).
 DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = (
     ".git",
     "node_modules",
@@ -95,14 +97,71 @@ class IngestionResult:
     ignored_paths: list[str] = field(default_factory=list)
 
 
+# Phase 10.11: limits on a repository's own extra patterns
+# (`Repository.ignore_patterns`), enforced by `normalize_ignore_patterns`.
+MAX_USER_IGNORE_PATTERNS = 50
+MAX_IGNORE_PATTERN_LENGTH = 200
+
+
 def _matches_ignore_patterns(relative_posix_path: str, ignore_patterns: tuple[str, ...]) -> bool:
+    """A slash-free pattern matches the whole path or any single segment
+    ("node_modules", "*.min.js"). A pattern with a "/" is anchored at the
+    repository root (a leading "/" is optional) and matches the path itself
+    *or any folder above it* — so "server/tests" ignores everything inside
+    that folder, not only a file literally named "server/tests" (Phase 10.11:
+    before user patterns existed no default contained a "/", so this changes
+    nothing for the defaults)."""
     parts = PurePosixPath(relative_posix_path).parts
     for pattern in ignore_patterns:
         if fnmatch.fnmatch(relative_posix_path, pattern):
             return True
-        if "/" not in pattern and any(fnmatch.fnmatch(part, pattern) for part in parts):
+        if "/" not in pattern:
+            if any(fnmatch.fnmatch(part, pattern) for part in parts):
+                return True
+            continue
+        anchored = pattern.lstrip("/")
+        if any(fnmatch.fnmatch("/".join(parts[:end]), anchored) for end in range(1, len(parts) + 1)):
             return True
     return False
+
+
+def normalize_ignore_patterns(raw_patterns: list[str]) -> list[str]:
+    """Cleans a user's ignore patterns (one per line in the UI) into the form
+    `_matches_ignore_patterns` expects, or raises `ValueError` with a message
+    naming the offending line. Pure, so the schema validator and the smoke
+    tests share it.
+
+    Each entry is trimmed; blank lines and `#` comments are dropped;
+    backslashes become "/" (a Windows-style path); a leading "./" and any
+    trailing "/" are removed (a trailing slash only says "folder", and a
+    pattern already matches a folder and its contents). Rejected: a
+    gitignore-style "!" negation (not supported — silently treating it as a
+    literal file name would ignore nothing), control characters, a pattern
+    longer than `MAX_IGNORE_PATTERN_LENGTH`, and one made only of "*" and "/"
+    (it would ignore every file). Duplicates are dropped, first one kept; at
+    most `MAX_USER_IGNORE_PATTERNS` remain."""
+    patterns: list[str] = []
+    for raw in raw_patterns:
+        pattern = raw.strip()
+        if not pattern or pattern.startswith("#"):
+            continue
+        if len(pattern) > MAX_IGNORE_PATTERN_LENGTH:
+            raise ValueError(f"pattern is longer than {MAX_IGNORE_PATTERN_LENGTH} characters: {pattern[:40]!r}...")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in pattern):
+            raise ValueError(f"pattern contains a control character: {pattern!r}")
+        if pattern.startswith("!"):
+            raise ValueError(f"negated patterns ('!') are not supported: {pattern!r}")
+        pattern = pattern.replace("\\", "/")
+        while pattern.startswith("./"):
+            pattern = pattern[2:]
+        pattern = pattern.rstrip("/")
+        if not pattern.strip("*/"):
+            raise ValueError(f"pattern would ignore every file: {raw.strip()!r}")
+        if pattern not in patterns:
+            patterns.append(pattern)
+    if len(patterns) > MAX_USER_IGNORE_PATTERNS:
+        raise ValueError(f"at most {MAX_USER_IGNORE_PATTERNS} patterns are allowed (got {len(patterns)})")
+    return patterns
 
 
 def _safe_relative_path(member_name: str) -> str | None:

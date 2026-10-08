@@ -12,7 +12,8 @@ model) and verifies `X-Hub-Signature-256` over the exact raw bytes *before*
 any JSON parsing; a bad/missing signature is the only `4xx` this route ever
 returns. Everything else that isn't an actionable push — a different event
 type, a malformed-but-signed body, an unconnected repository, a push to an
-untracked branch, a branch/tag deletion, a tag push — is an honest
+untracked branch, a repository set to manual analysis (Phase 10.11's
+`Repository.analysis_mode`), a branch/tag deletion, a tag push — is an honest
 `200 {"status": "ignored", "reason": ...}` (design decision #11): GitHub
 treats non-2xx as a failed delivery, and a verified-but-irrelevant delivery
 is not an error.
@@ -34,6 +35,7 @@ from app.core.config import get_settings
 from app.core.security import verify_github_webhook_signature
 from app.models.analysis_run import AnalysisRunTriggerSource
 from app.models.branch import Branch
+from app.models.repository import AnalysisMode
 from app.services import repo_service
 from app.workers.tasks.analysis_tasks import run_repository_analysis
 
@@ -87,6 +89,11 @@ def _handle_push(db: Session, payload: dict[str, Any]) -> JSONResponse:
     skip_reasons: list[str] = []
     enqueue_failed = False
     for repository in repositories:
+        # Phase 10.11: a copy set to `MANUAL` only analyzes from the "Analyze"
+        # button. Checked per copy — other users' copies still fan out.
+        if repository.analysis_mode is AnalysisMode.MANUAL:
+            skip_reasons.append("analysis mode is manual")
+            continue
         selected_branch = db.execute(
             select(Branch).where(Branch.repository_id == repository.id, Branch.is_selected == True)  # noqa: E712
         ).scalar_one_or_none()

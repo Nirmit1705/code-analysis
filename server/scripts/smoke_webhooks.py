@@ -39,6 +39,10 @@ Gating groups:
 9. `run_multi_user_fanout()` — Known Issue #28: one GitHub repo connected by
    several users -> the push queues a run for every copy that tracks the
    pushed branch, and none for one that tracks a different branch.
+10. `run_manual_mode()` — Phase 10.11: a repository set to `MANUAL` -> a
+   signed push to its tracked branch is `200 ignored` ("manual"), zero rows,
+   zero enqueues; switched back to `ON_PUSH` the same push queues (202); with
+   two users' copies, only the `ON_PUSH` copy gets a run.
 
 Run: `uv run python scripts/smoke_webhooks.py` (from `server/`).
 """
@@ -64,7 +68,7 @@ from app.core.security import create_access_token, verify_github_webhook_signatu
 from app.main import app  # noqa: E402
 from app.models.analysis_run import AnalysisRun, AnalysisRunStatus, AnalysisRunTriggerSource  # noqa: E402
 from app.models.branch import Branch  # noqa: E402
-from app.models.repository import Repository  # noqa: E402
+from app.models.repository import AnalysisMode, Repository  # noqa: E402
 from app.services import repo_service  # noqa: E402
 from smoke_storage import _clear_previous_runs, _get_or_create_repository, _get_or_create_user  # noqa: E402
 
@@ -125,6 +129,8 @@ class _Env:
             db, user, github_repo_id=str(GITHUB_REPO_ID), owner="smoke-webhooks", name="repo"
         )
         _clear_previous_runs(db, self.repository)
+        # Phase 10.11: every group expects today's push-triggered behaviour.
+        self.repository.analysis_mode = AnalysisMode.ON_PUSH
         db.execute(delete(Branch).where(Branch.repository_id == self.repository.id))
         db.add(Branch(repository_id=self.repository.id, name=TRACKED_BRANCH, latest_commit_sha="0" * 40, is_default=True, is_selected=True))
         db.add(Branch(repository_id=self.repository.id, name="feature/other", latest_commit_sha="0" * 40, is_default=False, is_selected=False))
@@ -474,6 +480,67 @@ def run_multi_user_fanout() -> bool:
         db.close()
 
 
+# --- group 10 (Phase 10.11: analysis_mode) -------------------------------------------
+
+
+def run_manual_mode() -> bool:
+    print("=== group 10: MANUAL analysis mode -> pushes ignored; ON_PUSH unchanged ===")
+    db = SessionLocal()
+    env = _Env(db)
+    extra: Repository | None = None
+    try:
+        env.repository.analysis_mode = AnalysisMode.MANUAL
+        db.add(env.repository)
+        db.commit()
+        client = TestClient(app)
+
+        resp = _post_json(client, _push_payload())
+        body = resp.json()
+        ok = _check(
+            "MANUAL: push to the tracked branch -> 200 ignored (manual)",
+            resp.status_code == 200 and body.get("status") == "ignored" and "manual" in body.get("reason", ""),
+            f"{resp.status_code} {resp.text}",
+        )
+        ok &= _check("MANUAL: zero rows", env.run_count() == 0, str(env.run_count()))
+        ok &= _check("MANUAL: zero enqueues", env.delay_calls == [], str(env.delay_calls))
+
+        env.repository.analysis_mode = AnalysisMode.ON_PUSH
+        db.add(env.repository)
+        db.commit()
+        resp = _post_json(client, _push_payload())
+        ok &= _check("back to ON_PUSH: same push -> 202, one row", resp.status_code == 202 and env.run_count() == 1, resp.text)
+
+        # Fan-out: user B's copy is MANUAL, user A's is ON_PUSH -> only A queues.
+        user_b = _get_or_create_user(db, "smoke-webhooks-manual@local.test")
+        extra = _get_or_create_repository(
+            db, user_b, github_repo_id=str(GITHUB_REPO_ID), owner="smoke-webhooks", name="repo-manual"
+        )
+        _clear_previous_runs(db, extra)
+        db.execute(delete(Branch).where(Branch.repository_id == extra.id))
+        db.add(Branch(repository_id=extra.id, name=TRACKED_BRANCH, latest_commit_sha="0" * 40, is_default=True, is_selected=True))
+        extra.analysis_mode = AnalysisMode.MANUAL
+        db.add(extra)
+        db.commit()
+        resp = _post_json(client, _push_payload(after=COMMIT_B))
+        body = resp.json()
+        db.expire_all()
+        b_runs = db.execute(
+            select(func.count()).select_from(AnalysisRun).where(AnalysisRun.repository_id == extra.id)
+        ).scalar_one()
+        ok &= _check(
+            "fan-out: only the ON_PUSH copy queued",
+            resp.status_code == 202 and len(body.get("analysis_run_ids", [])) == 1 and env.run_count() == 2 and b_runs == 0,
+            f"{resp.status_code} {body} b_runs={b_runs}",
+        )
+        return ok
+    finally:
+        if extra is not None:
+            db.execute(delete(Repository).where(Repository.id == extra.id))
+            db.commit()
+        env.close()
+        db.close()
+
+
 # --- group 6 -------------------------------------------------------------------------
 
 
@@ -518,6 +585,7 @@ def main() -> int:
         "duplicate deliveries": run_duplicate_deliveries(),
         "concurrent duplicates": run_concurrent_duplicates(),
         "multi-user fan-out": run_multi_user_fanout(),
+        "manual analysis mode": run_manual_mode(),
     }
     print("\n=== summary ===")
     for name, passed in results.items():
