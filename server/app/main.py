@@ -3,6 +3,7 @@
 import logging
 
 from fastapi import Depends, FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -32,9 +33,13 @@ app.add_middleware(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    # `jsonable_encoder` (as FastAPI's own default handler does): a
+    # `field_validator` that raises `ValueError` puts that exception object in
+    # the error's `ctx`, which plain `json.dumps` can't serialise — without
+    # this, every such validation failure became a 500 (found in Phase 10.11).
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": "Validation error", "errors": exc.errors()},
+        content={"detail": "Validation error", "errors": jsonable_encoder(exc.errors())},
     )
 
 
