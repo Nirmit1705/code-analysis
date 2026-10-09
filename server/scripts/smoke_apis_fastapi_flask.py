@@ -161,6 +161,7 @@ def run_real_spot_check() -> bool:
         ("POST", "/api/v1/auth/register"),
         ("POST", "/api/v1/auth/login"),
         ("POST", "/api/v1/auth/refresh"),
+        ("POST", "/api/v1/auth/logout"),  # server-side logout, added after Phase 10.12
         ("GET", "/api/v1/auth/me"),
         ("GET", "/api/v1/auth/github/install"),
         ("GET", "/api/v1/auth/github/callback"),
