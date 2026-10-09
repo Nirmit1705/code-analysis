@@ -44,7 +44,7 @@ export const Route = createFileRoute("/")({
 const capabilities = [
   { icon: Network, title: "Architecture Intelligence", body: "An inferred, navigable map of services, boundaries and data flows — rebuilt on every commit." },
   { icon: Sparkles, title: "AI Codebase Assistant", body: "Repository-aware answers grounded in real files, with every claim linked to source." },
-  { icon: GitBranch, title: "Dependency Analysis", body: "Cycles, coupling hotspots, orphaned modules and outdated external packages with CVE context." },
+  { icon: GitBranch, title: "Dependency Analysis", body: "Cycles, coupling hotspots, orphaned modules and outdated external packages." },
   { icon: RouteIcon, title: "Feature Tracing", body: "Follow any feature from UI event to database write across every service it touches." },
   { icon: Target, title: "Impact Analysis", body: "Select a file, function or endpoint and see exactly what breaks downstream before you ship." },
   { icon: AlertTriangle, title: "Technical Debt", body: "Scored, prioritized and explained — duplication, complexity, cycles and doc gaps over time." },

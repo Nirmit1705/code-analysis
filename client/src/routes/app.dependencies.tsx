@@ -752,7 +752,6 @@ function Dependencies() {
 
           <p className="rounded-md border border-dashed border-border bg-surface-2/30 p-3 text-center text-[11.5px] text-subtle">
             Derived fresh from the dependency graph at read time — not a cached snapshot.
-            AI-generated insights will appear here once the assistant is wired up.
           </p>
         </>
       )}
