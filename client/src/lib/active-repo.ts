@@ -6,16 +6,24 @@
  * from `repo-data.ts` with no repo id anywhere.
  *
  * Deliberately a single global choice, not a `/app/$repositoryId/...` URL
- * param — the app has no multi-repo-switching UI yet (the `TopBar` dropdown
- * stays a non-functional visual placeholder), so a URL restructuring would
- * be scope beyond what any Phase 6 screen actually needs. Revisit if
- * multi-repo support is ever prioritized.
+ * param. The `TopBar` repository switcher changes it with
+ * `setActiveRepositoryId`, which notifies every mounted
+ * `useActiveRepositoryId` so screens re-query for the new repository
+ * without a reload.
  */
 import { useEffect, useState } from "react";
 
 import { useRepositories } from "@/lib/queries/repos";
 
 const ACTIVE_REPOSITORY_ID_KEY = "substrate.active_repository_id";
+
+/** Every mounted `useActiveRepositoryId` — each keeps its own state (see the
+ * hook's SSR note), so a change has to be pushed to all of them. */
+const listeners = new Set<() => void>();
+
+function notifyActiveRepositoryChanged(): void {
+  listeners.forEach((listener) => listener());
+}
 
 export function getActiveRepositoryId(): string | null {
   try {
@@ -32,6 +40,7 @@ export function setActiveRepositoryId(repositoryId: string): void {
     // localStorage unavailable (private browsing, disabled storage, SSR) —
     // the choice just won't persist across reloads.
   }
+  notifyActiveRepositoryChanged();
 }
 
 export function clearActiveRepositoryId(): void {
@@ -40,6 +49,7 @@ export function clearActiveRepositoryId(): void {
   } catch {
     // ignore
   }
+  notifyActiveRepositoryChanged();
 }
 
 /**
@@ -66,6 +76,16 @@ export function clearActiveRepositoryId(): void {
 export function useActiveRepositoryId(): string | null {
   const [id, setId] = useState<string | null>(null);
   const repositories = useRepositories();
+
+  // Another component switched (or cleared) the active repository. Storage
+  // can be unavailable, so a null read just re-runs the fallback below.
+  useEffect(() => {
+    const onChange = () => setId(getActiveRepositoryId());
+    listeners.add(onChange);
+    return () => {
+      listeners.delete(onChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (id !== null) return;
