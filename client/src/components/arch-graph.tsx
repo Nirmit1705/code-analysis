@@ -23,18 +23,14 @@ import {
 
 import { cn } from "@/lib/utils";
 import { HEADER_H, NODE_H, NODE_W, layoutGraph } from "@/lib/graph-layout";
-import {
-  graphEdges as mockGraphEdges,
-  graphNodes as mockGraphNodes,
-  type GraphNode,
-} from "@/lib/repo-data";
+import { graphEdges as mockGraphEdges, graphNodes as mockGraphNodes } from "@/lib/repo-data";
 
-/** The six module kinds Phase 6.5's backend classifier assigns
+/** The six module kinds the backend classifier assigns
  * (`server/app/services/module_classification.py::ModuleKind`) — the
  * single source of truth for this union, imported by every module that
  * needs to talk about a node's kind (`graph-layout.ts`,
  * `queries/architecture.ts`). */
-export type ModuleKind = GraphNode["kind"];
+export type ModuleKind = "frontend" | "gateway" | "service" | "data" | "external" | "cache";
 
 /** What `ArchGraph` needs to draw one node. Position is *not* part of it —
  * the graph lays itself out (`graph-layout.ts`). `loc` and `health` are
