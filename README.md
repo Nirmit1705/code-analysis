@@ -30,7 +30,7 @@ CodeLens AI exists to make a codebase legible again: not by asking an LLM to sum
 | **New developer** | A generated, repository-specific onboarding path instead of two weeks of shadowing |
 | **Software engineer** | A grounded Q&A assistant and impact analysis instead of interrupting the module owner or guessing |
 | **Senior engineer** | Evidence — coupling scores, cycles, complexity hotspots — to bring to a design review |
-| **Tech lead** | A technical debt trend and change-risk signal across branches and releases |
+| **Tech lead** | A technical debt trend and a change-risk signal across analysis runs |
 
 ## Core principle
 
@@ -55,7 +55,8 @@ The LLM is never the source of truth for something a parser or a graph algorithm
 │   React / TanStack  │  REST  │                   FastAPI                     │
 │   Start frontend     │◄──────►│  auth · github · analysis · dashboard ·       │
 │  (client/)           │  WS    │  architecture · codebase · dependencies ·     │
-│                      │        │  assistant · compare · impact                 │
+│                      │        │  apis · debt · tracer · onboarding ·          │
+│                      │        │  assistant · compare · impact · settings      │
 └──────────┬───────────┘        └───────┬───────────────────┬──────────────────┘
            │                            │                   │
            │ GitHub App                 │ Celery task       │ pgvector similarity +
@@ -90,12 +91,18 @@ The LLM is never the source of truth for something a parser or a graph algorithm
 | **Architecture Explorer** | A navigable component graph (frontend / API routes / services / data stores) inferred from real imports and route definitions, not folder structure |
 | **AI Codebase Assistant** | Repository-aware Q&A grounded in hybrid retrieval (vector + keyword + symbol-name + dependency-graph) over the repo's own chunks, with every answer citing real files/lines |
 | **Dependency Analysis** | Circular dependencies (Tarjan SCC), module coupling, orphaned files, and outdated external packages |
-| **Technical Debt Scoring** | Threshold-based rules — complexity, large files/modules, coupling, cycles, missing docs, outdated deps — rolled into one score, trackable per analysis run |
+| **Technical Debt** | Threshold-based rules — complexity, large files/modules, coupling, cycles, missing docs, outdated deps — rolled into one severity-weighted score, trended per analysis run, with new/resolved findings since the previous run and a grounded AI recommendation per finding |
+| **API Reference** | Every route found in the source (Express, Spring Boot, FastAPI, Flask), grouped by resource, with the route declaration, middleware as written, the file's imports and what changed since the previous analysis |
+| **Flow Tracer** | Pick an endpoint or any file and see the files a request can reach — route → controller → service → repository/model — computed from the real import graph, with the external services (database, cache, SDKs) it ends in and a short AI note per hop |
+| **Developer Onboarding** | A repository-specific reading order, foundations first, built from the architecture components: which files to open first and why, who depends on each part, and per-user "read" progress that survives re-analysis |
 | **Compare & Impact Analysis** | Diff any two completed analysis runs (added/removed/modified files, symbols, API routes, dependency edges) and compute a BFS blast-radius + deterministic risk rating for a change before you merge it |
-| **Per-file AI Insight** | On-demand, LLM-generated purpose/explanation for any file, grounded only in that file's own indexed chunks |
-| **Live Analysis Progress** | A background pipeline (`QUEUED → CLONING → PARSING → ANALYZING → BUILDING_GRAPH → INDEXING → COMPLETED`) streamed to the browser over WebSocket |
+| **Analysis History** | Every run with its trigger (push or manual), duration, file/API counts and debt score, with one-click Compare and Impact |
+| **Per-file and per-component AI Insight** | On-demand, LLM-generated explanations for a file or an architecture component, grounded only in that file's or component's own analysed facts and indexed chunks |
+| **Repository settings** | Choose whether a repository is re-analyzed on every push or only on request, exclude files and folders with your own ignore patterns, and start over or disconnect — each guarded by a typed confirmation |
+| **Automatic re-analysis** | A signed GitHub webhook queues a new analysis whenever the tracked branch is pushed to |
+| **Live Analysis Progress** | A background pipeline (`QUEUED → CLONING → PARSING → ANALYZING → BUILDING_GRAPH → INDEXING → GENERATING_INSIGHTS → COMPLETED`) streamed to the browser over WebSocket |
 
-A few dashboard sections shown on the marketing page (Feature Tracer, API Reference) are still front-end concepts pending their backend phase; generated Documentation is **coming soon** (the screen is a placeholder) — see [Project status](#project-status).
+Nothing on a screen is a stand-in: where CodeLens AI has no data for something, the screen says so instead of showing a made-up number. The landing page's preview graph is the one place that uses sample data. See [What isn't built yet](#what-isnt-built-yet).
 
 ## Tech stack
 
@@ -121,20 +128,24 @@ A few dashboard sections shown on the marketing page (Feature Tracer, API Refere
 client/                  Frontend — React + TanStack Start (see client/CLAUDE.md for conventions)
   src/routes/             File-based routes: landing page, auth, onboarding, /app/* dashboard screens
   src/components/         UI components (architecture graph, panels, charts, code viewer, etc.)
-  src/lib/                Typed API client, TanStack Query hooks per domain, mock data (repo-data.ts)
+  src/lib/                Typed API client and TanStack Query hooks per domain (sample data for the
+                            landing-page preview only)
 
 server/                  Backend — FastAPI service, independent Python project (uv-managed)
   app/api/v1/              REST endpoints (auth, github, analysis, dashboard, architecture,
-                            codebase, dependencies, assistant, compare, impact)
+                            codebase, dependencies, apis, debt, tracer, onboarding, assistant,
+                            compare, impact, repository settings, webhooks)
   app/api/ws/              WebSocket analysis-progress endpoint
   app/analysis/            Pure analysis pipeline — ingestion, Tree-sitter parsing, symbol/API/
-                            dependency extraction, complexity metrics, debt rules, change diffing
+                            dependency extraction, complexity metrics, debt rules, layer
+                            classification and request tracing, change diffing
   app/rag/                 Embedding, reranking, hybrid retrieval, indexing orchestration
   app/ai/                  LLM provider + prompt construction (Groq)
   app/models/, app/schemas/  SQLAlchemy models / Pydantic schemas
   app/services/, app/workers/ Persistence + read services, Celery app and background tasks
   alembic/                 Database migrations
-  scripts/                 Fixture-based smoke-test scripts (no pytest suite — kept deliberately light)
+  scripts/                 Fixture-based smoke-test scripts (no pytest suite — kept deliberately light);
+                            run one with `uv run python scripts/smoke_<name>.py`
 ```
 
 ## Getting started
@@ -175,20 +186,16 @@ uv run celery -A app.workers.celery_app worker --loglevel=info --pool=solo   # -
 
 Full local setup detail — environment variables, the GitHub App/webhook relay, and troubleshooting — lives in [`server/README.md`](server/README.md).
 
-## Project status
+## What isn't built yet
 
-CodeLens AI is built in phases, each with an explicit backend build-out followed by frontend wiring. As of this writing:
+CodeLens AI is feature-complete for the screens listed above; these are known gaps, stated plainly rather than papered over:
 
-| Phase | Scope | Status |
-|---|---|---|
-| 0–1 | Backend foundation, auth | ✅ Complete |
-| 2 | GitHub App integration (connect, select repo/branch) | ✅ Complete |
-| 3 | Analysis engine (parsing, symbols, APIs, dependencies, complexity) | ✅ Complete |
-| 4 | Intelligence storage (dependency graph, technical debt scoring) | ✅ Complete |
-| 5 | Background processing (Celery pipeline, WebSocket progress) | ✅ Complete |
-| 6 | Frontend integration (Dashboard, Architecture, Codebase, Dependencies) | ✅ Complete |
-| 7 | RAG pipeline (chunking, local embeddings, hybrid retrieval) | ✅ Complete |
-| 8 | AI Assistant + generated insights | ✅ Complete |
-| 9 | Change intelligence (Compare, Impact analysis, webhook re-analysis, History) | 🚧 In progress |
+- **Generated documentation** — the Documentation screen is a "coming soon" placeholder with an illustration; nothing is generated yet.
+- **Per-endpoint auth, request and response shapes** — the API Reference shows what the route declaration and its imports prove (path, method, middleware written on the route, handler), and says so where it can't tell whether a route is protected.
+- **Frontend → backend call edges** — the architecture graph is built from imports, so a React app and an API in separate packages are not linked by an HTTP edge.
+- **Function-level call graph** — the Flow Tracer works at file level: only the starting hop names a function (the route's handler).
+- **One analyzed branch per repository**, and **on-push or manual** analysis only — no multi-branch tracking and no scheduled (daily) analysis.
+- **Team members, notifications, API tokens and billing** — listed on the Profile screen as "not in CodeLens AI yet".
+- **Proactive delivery** — for example posting the Impact result on a GitHub pull request — is planned, not built.
 
-Screens not yet listed above (Feature Tracer, Technical Debt, API Reference, general Settings) still render illustrative sample data pending their turn in the roadmap. Generated Documentation is paused and shows a "coming soon" screen.
+Backend setup, the GitHub App and webhook relay, and troubleshooting are in [`server/README.md`](server/README.md); frontend conventions are in [`client/CLAUDE.md`](client/CLAUDE.md).
