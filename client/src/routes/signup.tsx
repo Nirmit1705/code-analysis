@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Github, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import { AuthFrame, Field } from "./login";
+import { AuthFrame, Field, GithubSignInButton } from "./login";
 import { useRegister } from "@/lib/queries/auth";
 import { ApiError } from "@/lib/api";
 
@@ -61,17 +61,14 @@ function SignUp() {
         </>
       }
     >
-      <p className="rounded-md border border-border bg-surface-2/50 px-3 py-2.5 text-center text-[12px] text-muted-foreground">
-        <Github className="mr-1.5 inline size-3.5 align-[-2px]" />
-        GitHub connects from onboarding, once you have an account — create one with email first.
-      </p>
+      <GithubSignInButton label="Sign up with GitHub" />
       <p className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10.5px] text-subtle">
         <ShieldCheck className="size-3 text-success" /> Read-only access · no code stored
       </p>
 
       <div className="my-5 flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="label-xs">create account with email</span>
+        <span className="label-xs">or create account with email</span>
         <span className="h-px flex-1 bg-border" />
       </div>
 

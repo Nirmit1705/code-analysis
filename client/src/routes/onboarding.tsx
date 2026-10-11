@@ -34,6 +34,8 @@ import {
   type AnalysisRunStatus,
 } from "@/lib/queries/analysis";
 import {
+  consumeOAuthState,
+  useGithubAuthorize,
   useGithubExchange,
   useGithubInstall,
   useGithubRepos,
@@ -55,6 +57,11 @@ const searchSchema = z.object({
   exchange_code: z.coerce.string().optional(),
   installation_id: z.coerce.string().optional(),
   github_error: z.coerce.string().optional(),
+  // Set by `GET /auth/github/login/callback` (the "link GitHub" OAuth return):
+  // `oauth_state` must match the one this browser started with; `needs_install`
+  // means the person is verified but the App isn't installed on their account yet.
+  oauth_state: z.coerce.string().optional(),
+  needs_install: z.coerce.string().optional(),
 });
 
 export const Route = createFileRoute("/onboarding")({
@@ -163,7 +170,10 @@ function Onboarding() {
   const search = Route.useSearch();
 
   const githubInstall = useGithubInstall();
+  const githubAuthorize = useGithubAuthorize("link");
   const githubExchange = useGithubExchange();
+  // Strict Mode runs effects twice in dev; a returning OAuth state is single-use.
+  const handledExchange = useRef<string | null>(null);
   // Also probed while on step 1 (not just step 2): GitHub only round-trips
   // through our callback on the *first* authorization of an installation —
   // revisiting "Authorize GitHub" once already installed just lands the user
@@ -177,18 +187,34 @@ function Onboarding() {
   const selectRepo = useSelectRepo();
   const selectBranch = useSelectBranch(repository?.id ?? null);
 
-  // Landing back here after the real GitHub App install round-trip
-  // (`GET /auth/github/callback` → this route, Phase 2.5). `exchange_code` is
-  // the one-time code the callback hands us in place of raw JWTs (see
+  // Landing back here from GitHub, by either route:
+  //  - the App install round-trip (`GET /auth/github/callback`, Phase 2.5), or
+  //  - the "link GitHub" OAuth return (`GET /auth/github/login/callback`),
+  //    which also carries `oauth_state` (must be this browser's) and, when the
+  //    App isn't installed on the person's own account yet, `needs_install`.
+  // `exchange_code` is the one-time code handed over in place of raw JWTs (see
   // `server/app/api/v1/github.py::github_exchange`) — trade it for real
-  // tokens, then jump straight to repository selection.
+  // tokens, then jump to repository selection (or, for `needs_install`, on to
+  // GitHub's install page, since the person just asked to connect).
   useEffect(() => {
-    if (search.exchange_code && !githubExchange.isPending && !githubExchange.isSuccess) {
+    if (search.exchange_code) {
+      if (handledExchange.current === search.exchange_code) return;
+      handledExchange.current = search.exchange_code;
+      if (search.oauth_state !== undefined && !consumeOAuthState(search.oauth_state)) {
+        toast.error("That GitHub connection didn't start in this browser — please try again.");
+        void navigate({ to: "/onboarding", search: {}, replace: true });
+        return;
+      }
+      const needsInstall = Boolean(search.needs_install);
       githubExchange.mutate(search.exchange_code, {
         onSuccess: () => {
+          void navigate({ to: "/onboarding", search: {}, replace: true });
+          if (needsInstall) {
+            startInstall();
+            return;
+          }
           toast.success("GitHub connected");
           setStep(2);
-          void navigate({ to: "/onboarding", search: {}, replace: true });
         },
         onError: () => {
           toast.error("Couldn't complete the GitHub connection — please try again.");
@@ -202,17 +228,30 @@ function Onboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.exchange_code, search.github_error]);
 
+  // Second half of connecting: install the App (choose repositories) on GitHub.
+  const startInstall = () => {
+    githubInstall.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.install_url;
+      },
+      onError: () => toast.error("Couldn't start the GitHub App install — please try again."),
+    });
+  };
+
+  // First half: prove who the person is on GitHub and attach it to this
+  // account. If their own account already has the App installed, that is
+  // connected right here and the install page is skipped (Known Issue #17).
   const handleAuthorizeGithub = () => {
     if (!isAuthenticated()) {
       toast.error("Sign in first, then connect GitHub.");
       void navigate({ to: "/login" });
       return;
     }
-    githubInstall.mutate(undefined, {
+    githubAuthorize.mutate(undefined, {
       onSuccess: (data) => {
-        window.location.href = data.install_url;
+        window.location.href = data.authorize_url;
       },
-      onError: () => toast.error("Couldn't start the GitHub App install — please try again."),
+      onError: () => toast.error("Couldn't start the GitHub connection — please try again."),
     });
   };
 
@@ -359,10 +398,10 @@ function Onboarding() {
               <div className="mt-5 flex items-center gap-2">
                 <button
                   onClick={handleAuthorizeGithub}
-                  disabled={githubInstall.isPending}
+                  disabled={githubAuthorize.isPending || githubInstall.isPending}
                   className="focus-ring flex items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-4 py-2.5 text-[13px] font-medium hover:bg-surface-3 disabled:opacity-60"
                 >
-                  {githubInstall.isPending ? (
+                  {githubAuthorize.isPending || githubInstall.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <Github className="size-4" />

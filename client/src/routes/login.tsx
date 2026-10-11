@@ -1,13 +1,29 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Github, ArrowRight, Loader2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 
 import { PRODUCT } from "@/lib/repo-data";
 import { useLogin } from "@/lib/queries/auth";
+import {
+  consumeOAuthState,
+  useGithubAuthorize,
+  useGithubExchange,
+} from "@/lib/queries/repos";
 import { ApiError } from "@/lib/api";
 
+// What `GET /auth/github/login/callback` appends when it sends the browser back
+// after "Continue with GitHub". `z.coerce.string()` because the router
+// JSON-parses values, so `github_error=1` arrives as a number (see onboarding.tsx).
+const searchSchema = z.object({
+  exchange_code: z.coerce.string().optional(),
+  oauth_state: z.coerce.string().optional(),
+  github_error: z.coerce.string().optional(),
+});
+
 export const Route = createFileRoute("/login")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Sign in — CodeLens AI" },
@@ -108,11 +124,75 @@ export function Field({
   );
 }
 
+/** "Continue with GitHub": asks the API where to send the browser, then goes
+ * there. Shared by the sign-in and sign-up screens. */
+export function GithubSignInButton({ label }: { label: string }) {
+  const authorize = useGithubAuthorize("signin");
+
+  const handleClick = () => {
+    authorize.mutate(undefined, {
+      onSuccess: (data) => {
+        window.location.href = data.authorize_url;
+      },
+      onError: (err) => {
+        const message =
+          err instanceof ApiError && err.status === 503
+            ? "GitHub sign-in isn't configured on this server."
+            : "Couldn't start GitHub sign-in — please try again.";
+        toast.error(message);
+      },
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={authorize.isPending}
+      className="focus-ring flex w-full items-center justify-center gap-2 rounded-md border border-border-strong bg-surface-2 px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3 disabled:opacity-60"
+    >
+      {authorize.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Github className="size-4" />}
+      {label}
+    </button>
+  );
+}
+
 function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
   const login = useLogin();
+  const search = Route.useSearch();
+  const githubExchange = useGithubExchange();
+  // React Strict Mode runs effects twice in dev; the state check below spends
+  // its one use, so a code is handled once.
+  const handledCode = useRef<string | null>(null);
+
+  // Returning from github.com (`/auth/github/login/callback` -> here): refuse a
+  // return this browser didn't start, otherwise trade the one-time code for a
+  // session and carry on to onboarding exactly like an email sign-in.
+  useEffect(() => {
+    if (search.exchange_code) {
+      if (handledCode.current === search.exchange_code) return;
+      handledCode.current = search.exchange_code;
+      if (!search.oauth_state || !consumeOAuthState(search.oauth_state)) {
+        toast.error("That GitHub sign-in didn't start in this browser — please try again.");
+        void navigate({ to: "/login", search: {}, replace: true });
+        return;
+      }
+      githubExchange.mutate(search.exchange_code, {
+        onSuccess: () => void navigate({ to: "/onboarding", search: {}, replace: true }),
+        onError: () => {
+          toast.error("Couldn't complete GitHub sign-in — please try again.");
+          void navigate({ to: "/login", search: {}, replace: true });
+        },
+      });
+    } else if (search.github_error) {
+      toast.error("GitHub sign-in failed or was cancelled.");
+      void navigate({ to: "/login", search: {}, replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.exchange_code, search.github_error]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -142,14 +222,11 @@ function Login() {
         </>
       }
     >
-      <p className="rounded-md border border-border bg-surface-2/50 px-3 py-2.5 text-center text-[12px] text-muted-foreground">
-        <Github className="mr-1.5 inline size-3.5 align-[-2px]" />
-        GitHub connects from onboarding, once you have an account — sign in with email first.
-      </p>
+      <GithubSignInButton label="Continue with GitHub" />
 
       <div className="my-5 flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="label-xs">sign in with email</span>
+        <span className="label-xs">or sign in with email</span>
         <span className="h-px flex-1 bg-border" />
       </div>
 

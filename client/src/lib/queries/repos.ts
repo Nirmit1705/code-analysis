@@ -66,6 +66,42 @@ export function useGithubInstall() {
   });
 }
 
+const OAUTH_STATE_KEY = "codelens.github_oauth_state";
+
+/** `GET /auth/github/authorize` (a visitor signing in with GitHub) or
+ * `/authorize/link` (a signed-in user attaching GitHub, from onboarding). The
+ * returned `state` is parked in `sessionStorage`; the page GitHub sends the
+ * browser back to must present the same value (`consumeOAuthState`), which is
+ * what ties the return to the browser that started it. */
+export function useGithubAuthorize(mode: "signin" | "link") {
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ authorize_url: string; state: string }>(
+        mode === "link" ? "/auth/github/authorize/link" : "/auth/github/authorize",
+        { auth: mode === "link" },
+      ),
+    onSuccess: (data) => {
+      try {
+        sessionStorage.setItem(OAUTH_STATE_KEY, data.state);
+      } catch {
+        // storage blocked: the return is then refused rather than trusted
+      }
+    },
+  });
+}
+
+/** True when `returned` is the state this browser started the flow with. One
+ * use only — the stored value is removed either way. */
+export function consumeOAuthState(returned: string): boolean {
+  try {
+    const stored = sessionStorage.getItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    return stored !== null && stored === returned;
+  } catch {
+    return false;
+  }
+}
+
 /** `POST /auth/github/exchange` — trades the callback's one-time
  * `exchange_code` (Phase 2.5) for a real token pair and stores it. */
 export function useGithubExchange() {
