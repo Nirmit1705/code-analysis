@@ -14,6 +14,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 import jwt
@@ -125,6 +126,64 @@ def _get_all_pages(
         if len(page_items) < per_page:
             return items
         page += 1
+
+
+GITHUB_OAUTH_BASE = "https://github.com/login/oauth"
+
+
+def build_authorize_url(state: str, redirect_uri: str) -> str:
+    """The github.com page that asks the person to authorize this App as
+    themselves (user-to-server OAuth). GitHub Apps take no `scope`; what the
+    resulting token can do is set by the App's own permissions."""
+    settings = get_settings()
+    query = urlencode(
+        {"client_id": settings.GITHUB_CLIENT_ID, "redirect_uri": redirect_uri, "state": state}
+    )
+    return f"{GITHUB_OAUTH_BASE}/authorize?{query}"
+
+
+def exchange_oauth_code(code: str, redirect_uri: str) -> str:
+    """POST github.com/login/oauth/access_token — trades the `code` GitHub
+    appended to the callback for a user access token. GitHub answers 200 with
+    an `error` field for a bad/used code, so the body is checked too. The token
+    is used for the identity reads below and then dropped, never stored."""
+    settings = get_settings()
+    response = httpx.post(
+        f"{GITHUB_OAUTH_BASE}/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": redirect_uri,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    if response.status_code >= 400:
+        raise GitHubServiceError(response.status_code, response.text)
+    body = response.json()
+    token = body.get("access_token")
+    if not token:
+        raise GitHubServiceError(400, str(body.get("error_description") or body.get("error") or "no access token"))
+    return token
+
+
+def get_authenticated_user(user_token: str) -> dict[str, Any]:
+    """GET /user (user-token-authed) — the signed-in GitHub person (`id`, `login`)."""
+    return _request("GET", "/user", token=user_token).json()
+
+
+def list_user_emails(user_token: str) -> list[dict[str, Any]]:
+    """GET /user/emails (user-token-authed) — needs the App's "Email addresses"
+    account permission; GitHub answers 403/404 without it. Each entry has
+    `email`, `primary`, `verified`."""
+    return _request("GET", "/user/emails", token=user_token).json()
+
+
+def list_user_installations(user_token: str) -> list[dict[str, Any]]:
+    """GET /user/installations (user-token-authed) — installations of this App
+    the person can access, personal and organization alike."""
+    return _get_all_pages("/user/installations", token=user_token, items_key="installations")
 
 
 def get_app() -> dict[str, Any]:

@@ -6,6 +6,8 @@ Phase 2.4 endpoints on `repos_router` below, in this same file per the plan.
 """
 
 import hashlib
+import json
+import secrets
 import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -28,7 +30,7 @@ from app.models.branch import Branch
 from app.models.repository import Repository
 from app.models.user import User
 from app.schemas.auth import TokenResponse
-from app.schemas.github import GitHubExchangeRequest, GitHubInstallResponse
+from app.schemas.github import GitHubAuthorizeResponse, GitHubExchangeRequest, GitHubInstallResponse
 from app.schemas.repository import (
     BranchRead,
     GitHubRepoSummary,
@@ -42,6 +44,7 @@ from app.services.github_auth_service import (
     GitHubAuthError,
     connect_installation,
     get_installation_token_for_user,
+    sign_in_with_github,
 )
 
 router = APIRouter(prefix="/auth/github", tags=["github"])
@@ -87,6 +90,7 @@ def github_callback(
     installation_id: str | None = Query(default=None),
     setup_action: str | None = Query(default=None),
     state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     """GitHub redirects here after the user completes (or cancels) the App
@@ -101,6 +105,16 @@ def github_callback(
     settings = get_settings()
     error_url = f"{settings.FRONTEND_URL}/onboarding?github_error=1"
 
+    if error and state:
+        # Declining on github.com's *sign-in* authorize page is sent here (the
+        # App's first registered Callback URL), not to `/login/callback`, with
+        # the sign-in flow's state nonce. Send the person back to the page that
+        # started that flow instead of to onboarding.
+        saved = _consume_oauth_state(state)
+        if saved is not None:
+            return RedirectResponse(
+                f"{settings.FRONTEND_URL}/{_oauth_return_page(saved['mode'])}?github_error=1", status_code=302
+            )
     if not state:
         return RedirectResponse(error_url, status_code=302)
     try:
@@ -128,6 +142,117 @@ def github_callback(
     success_params = {"installation_id": installation_id, "exchange_code": exchange_code}
     success_url = f"{settings.FRONTEND_URL}/onboarding?" + urlencode(success_params)
     return RedirectResponse(success_url, status_code=302)
+
+
+# Known Issue #4/#17: GitHub *identity* flow (OAuth as the person), used both
+# to sign in with GitHub and to link GitHub from onboarding. State is a random
+# nonce held in Redis (single-use, short-lived) rather than a JWT, because the
+# sign-in mode has no user yet to put in `sub`.
+OAUTH_STATE_KEY_PREFIX = "github_oauth_state:"
+OAUTH_STATE_TTL_SECONDS = 600
+OAUTH_MODE_SIGNIN = "signin"
+OAUTH_MODE_LINK = "link"
+
+
+def _oauth_state_key(nonce: str) -> str:
+    return OAUTH_STATE_KEY_PREFIX + hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+
+def _oauth_redirect_uri() -> str:
+    return f"{get_settings().BACKEND_URL.rstrip('/')}/api/v1/auth/github/login/callback"
+
+
+def _consume_oauth_state(nonce: str) -> dict | None:
+    """Spends an OAuth state nonce (GETDEL: usable exactly once, whatever
+    happens next) and returns what was saved with it, or `None` if it is
+    unknown, expired or already used."""
+    raw = get_redis_client().getdel(_oauth_state_key(nonce))
+    if raw is None:
+        return None
+    try:
+        saved = json.loads(raw)
+        return saved if saved.get("mode") else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def _oauth_return_page(mode: str) -> str:
+    return "onboarding" if mode == OAUTH_MODE_LINK else "login"
+
+
+def _start_oauth(mode: str, email: str | None = None) -> GitHubAuthorizeResponse:
+    settings = get_settings()
+    if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="GitHub sign-in is not configured")
+    nonce = secrets.token_urlsafe(32)
+    get_redis_client().set(
+        _oauth_state_key(nonce),
+        json.dumps({"mode": mode, "email": email}),
+        ex=OAUTH_STATE_TTL_SECONDS,
+    )
+    return GitHubAuthorizeResponse(
+        authorize_url=github_service.build_authorize_url(nonce, _oauth_redirect_uri()), state=nonce
+    )
+
+
+@router.get("/authorize", response_model=GitHubAuthorizeResponse)
+def github_authorize() -> GitHubAuthorizeResponse:
+    """Starts "Continue with GitHub" for a visitor who isn't signed in. JSON
+    rather than a redirect for the same reason as `/install`."""
+    return _start_oauth(OAUTH_MODE_SIGNIN)
+
+
+@router.get("/authorize/link", response_model=GitHubAuthorizeResponse)
+def github_authorize_link(current_user: User = Depends(get_current_user)) -> GitHubAuthorizeResponse:
+    """Starts the same flow for a signed-in user (onboarding's Authorize
+    GitHub), so the GitHub person is attached to *this* account."""
+    return _start_oauth(OAUTH_MODE_LINK, current_user.email)
+
+
+@router.get("/login/callback")
+def github_login_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """GitHub redirects the browser here after the person authorizes (or
+    declines). Consumes the state nonce, finishes the flow in
+    `github_auth_service.sign_in_with_github`, and hands the frontend a
+    one-time `exchange_code` (traded at `/exchange`, like the install flow) —
+    never tokens in a URL. Every failure is a redirect with `github_error=1`."""
+    settings = get_settings()
+    login_error = f"{settings.FRONTEND_URL}/login?github_error=1"
+    if not state:
+        return RedirectResponse(login_error, status_code=302)
+
+    saved = _consume_oauth_state(state)
+    if saved is None:
+        return RedirectResponse(login_error, status_code=302)
+    mode = saved["mode"]
+
+    page = _oauth_return_page(mode)
+    error_url = f"{settings.FRONTEND_URL}/{page}?github_error=1"
+    if not code:  # the person declined on github.com (`error=access_denied`)
+        return RedirectResponse(error_url, status_code=302)
+
+    link_user = None
+    if mode == OAUTH_MODE_LINK:
+        link_user = get_user_by_email(db, saved.get("email") or "")
+        if link_user is None:
+            return RedirectResponse(error_url, status_code=302)
+
+    try:
+        result = sign_in_with_github(db, code, _oauth_redirect_uri(), link_user=link_user)
+    except GitHubAuthError:
+        return RedirectResponse(error_url, status_code=302)
+
+    params = {
+        "exchange_code": create_action_token(result.user.email, EXCHANGE_TOKEN_TYPE, EXCHANGE_TOKEN_TTL),
+        "oauth_state": state,
+    }
+    if result.needs_install:
+        params["needs_install"] = "1"
+    return RedirectResponse(f"{settings.FRONTEND_URL}/{page}?" + urlencode(params), status_code=302)
 
 
 @router.post("/exchange", response_model=TokenResponse)

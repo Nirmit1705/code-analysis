@@ -22,7 +22,9 @@ PostgreSQL, Redis, the FastAPI server, and a Celery worker are the normal local 
    - `SMEE_WEBHOOK_URL` — only needed for webhook work; a channel URL from [smee.io](https://smee.io) (click "Start a new channel").
    - `LLM_API_KEY` — not required yet; Phase 8's job.
    - Embedding/reranker settings (`EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`RERANKER_PROVIDER`/`RERANKER_MODEL`) — required as of Phase 7.4/7.5; `.env.example` already carries the correct local-model values, no manual edits needed. The Celery worker calls the embedding model for real on every completed analysis run now (`app/rag/indexing.py`), not just from an opt-in smoke script — see the note under "Celery worker" below.
-   - **Note:** `.env.example` also documents `SMEE_WEBHOOK_URL` and `BACKEND_URL`, but `app/core/config.py::Settings` doesn't declare them as fields yet (they're silently ignored — `extra="ignore"`). They're there for forward/manual reference, not because app code reads them today.
+   - `BACKEND_URL` — this API's public base URL (default `http://localhost:8000`); "Continue with GitHub" builds its OAuth `redirect_uri` from it.
+   - **Note:** `SMEE_WEBHOOK_URL` is documented in `.env.example` but `app/core/config.py::Settings` doesn't declare it (silently ignored — `extra="ignore"`); it's for the Smee command below, not read by app code.
+   - **GitHub App settings for "Continue with GitHub"** (on the App's settings page; nothing to set in `.env`): add `{BACKEND_URL}/api/v1/auth/github/login/callback` (locally `http://localhost:8000/api/v1/auth/github/login/callback`) under **Callback URL**, and set **Permissions & events → Account permissions → Email addresses** to **Read-only**. Leave "Request user authorization (OAuth) during installation" off. Without the email permission sign-in still works but a person gets a `…@users.noreply.github.com` account instead of matching their existing email account.
 2. Install dependencies: `uv sync` (from `server/`).
 
 ## Database

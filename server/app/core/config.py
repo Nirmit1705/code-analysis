@@ -54,6 +54,10 @@ class Settings(BaseSettings):
 
     # Development — where GitHub-connect redirects (install/callback) send the browser back to.
     FRONTEND_URL: str = "http://localhost:8080"
+    # Public base URL of this API — builds the GitHub sign-in `redirect_uri`
+    # (`{BACKEND_URL}/api/v1/auth/github/login/callback`), which must match a
+    # Callback URL registered on the GitHub App exactly.
+    BACKEND_URL: str = "http://localhost:8000"
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
