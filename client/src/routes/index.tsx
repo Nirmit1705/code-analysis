@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import {
   AnalysisScreen,
@@ -103,44 +104,71 @@ const more = [
   },
 ];
 
-function BrandMark() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        d="M3 11.5 8 3l5 8.5"
-        fill="none"
-        stroke="oklch(0.762 0.163 46)"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="8" cy="12.4" r="1.4" fill="oklch(0.648 0.192 41)" />
-    </svg>
-  );
+/** True while the user is scrolling down past the top of the page; false on any scroll up. */
+function useHideOnScrollDown() {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let lastY = window.scrollY;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const y = window.scrollY;
+      // A few px of slack so trackpad jitter and iOS rubber-banding don't flip it.
+      if (y < 80) setHidden(false);
+      else if (y > lastY + 6) setHidden(true);
+      else if (y < lastY - 6) setHidden(false);
+      else return;
+      lastY = y;
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+  return hidden;
 }
 
 function Landing() {
+  const navHidden = useHideOnScrollDown();
   return (
     <div className="lp">
-      <header className="nav">
+      <header className="nav" data-hidden={navHidden}>
+        <div className="nav-blur" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
         <div className="wrap">
-          <a className="brand" href="#top">
-            <span className="mark">
-              <BrandMark />
-            </span>
-            CodeLens AI
-          </a>
-          <nav className="nav-links" aria-label="Sections">
-            <a href="#product">Product</a>
-            <a href="#how">How it works</a>
-            <a href="#teams">Teams</a>
-          </nav>
-          <div className="nav-end">
-            <Link to="/login" className="signin">
-              Sign in
-            </Link>
-            <Link to="/signup" className="btn btn-primary btn-sm">
-              Connect GitHub
-            </Link>
+          <div className="cap-bar">
+            <div className="cap-track">
+              <a className="brand" href="#top">
+                <img
+                  src="/codelens-wordmark-on-dark.svg"
+                  alt="CodeLens AI"
+                  width={163}
+                  height={28}
+                  className="wordmark"
+                />
+              </a>
+              <nav className="nav-links" aria-label="Sections">
+                <a href="#product">Product</a>
+                <a href="#how">How it works</a>
+                <a href="#teams">Teams</a>
+              </nav>
+              <div className="nav-end">
+                <Link to="/login" className="signin">
+                  Sign in
+                </Link>
+                <Link to="/signup" className="btn-pebble">
+                  Connect GitHub
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -331,10 +359,13 @@ function Landing() {
           <div className="foot">
             <div className="about">
               <a className="brand" href="#top">
-                <span className="mark">
-                  <BrandMark />
-                </span>
-                CodeLens AI
+                <img
+                  src="/codelens-wordmark-on-dark.svg"
+                  alt="CodeLens AI"
+                  width={163}
+                  height={28}
+                  className="wordmark"
+                />
               </a>
               <p>Codebase intelligence for your GitHub repositories.</p>
             </div>

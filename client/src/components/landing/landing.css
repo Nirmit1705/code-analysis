@@ -76,15 +76,36 @@
 .lp .btn-ghost { border: 1px solid var(--line-strong); color: var(--fg); }
 .lp .btn-ghost:hover { border-color: var(--muted); }
 .lp .btn-sm { height: 34px; padding-inline: 14px; font-size: 0.875rem; border-radius: 6px; }
-.lp .nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in oklab, var(--ink-0) 85%, transparent); backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); }
-.lp .nav .wrap { display: flex; align-items: center; gap: 32px; height: 60px; }
-.lp .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--fg); letter-spacing: -0.01em; }
-.lp .mark { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); background: color-mix(in oklab, var(--accent) 14%, transparent); border-radius: 6px; }
-.lp .nav-links { display: flex; gap: 24px; font-size: 0.9375rem; color: var(--muted); }
+/* Top nav: the app's floating capsule laid on its side. A raised shell (lighter at its top and bottom edges, darker through the
+ * middle, rim highlight, layered drop shadow) holds a recessed track; the items sit in the track and the call to action is the
+ * same raised "pebble" the app uses for the active page. Values mirror SideNav in components/app-shell.tsx. */
+.lp .nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; padding-top: 12px; pointer-events: none; transition: transform .38s cubic-bezier(.4, 0, .2, 1); }
+/* Scrolling down slides the whole bar (and the blur behind it) up out of view; any scroll up, or keyboard focus inside it, brings it back. */
+.lp .nav[data-hidden="true"]:not(:focus-within) { transform: translateY(calc(-100% - 64px)); }
+.lp .nav .wrap { position: relative; }
+/* Progressive blur: four stacked backdrop blurs, each fading out at a different depth, so the blur is strongest at the top edge of
+ * the window and eases to nothing below the bar. There is no edge to see where it ends. */
+.lp .nav-blur { position: absolute; inset: 0 0 -52px 0; pointer-events: none; z-index: 0; }
+.lp .nav-blur i { position: absolute; inset: 0; }
+.lp .nav-blur i:nth-child(1) { backdrop-filter: blur(1px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 45%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 45%, transparent 100%); }
+.lp .nav-blur i:nth-child(2) { backdrop-filter: blur(2px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 35%, transparent 80%); mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 35%, transparent 80%); }
+.lp .nav-blur i:nth-child(3) { backdrop-filter: blur(4px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 28%, transparent 62%); mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 28%, transparent 62%); }
+.lp .nav-blur i:nth-child(4) { backdrop-filter: blur(8px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 20%, transparent 44%); mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.6) 20%, transparent 44%); }
+@media (prefers-reduced-motion: reduce) {
+.lp .nav { transition-duration: .01ms; }
+}
+.lp .nav .cap-bar { position: relative; z-index: 1; pointer-events: auto; padding: 5px; border-radius: 999px; background: linear-gradient(to bottom, color-mix(in oklab, var(--surface-3) 90%, transparent), color-mix(in oklab, var(--surface-2) 60%, transparent), color-mix(in oklab, var(--surface-3) 90%, transparent)); backdrop-filter: blur(24px); box-shadow: 0 0 0 1px oklch(1 0 0 / 0.07), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.5), 0 3px 8px rgba(0,0,0,0.5), 0 28px 56px -14px rgba(0,0,0,0.95); }
+.lp .nav .cap-track { display: flex; align-items: center; gap: 24px; height: 50px; padding: 3px 3px 3px 14px; border-radius: 999px; background: linear-gradient(to bottom, var(--ink-0), color-mix(in oklab, var(--ink-0) 90%, transparent), color-mix(in oklab, var(--surface) 70%, transparent)); box-shadow: inset 0 8px 16px -6px rgba(0,0,0,0.8), inset 0 0 14px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,0,0,0.4), inset 0 -1px 0 rgba(255,255,255,0.09); }
+.lp .brand { display: flex; align-items: center; }
+.lp .wordmark { display: block; height: 28px; width: auto; }
+.lp .nav-links { display: flex; gap: 2px; font-size: 0.9375rem; color: var(--muted); }
+.lp .nav-links a,
+.lp .nav-end .signin { display: flex; align-items: center; height: 40px; padding-inline: 16px; border-radius: 999px; color: var(--muted); transition: background-color .15s, color .15s; }
 .lp .nav-links a:hover,
-.lp .nav-end .signin:hover { color: var(--fg); }
-.lp .nav-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.lp .nav-end .signin { padding-inline: 12px; font-size: 0.9375rem; color: var(--muted); }
+.lp .nav-end .signin:hover { background: var(--surface-2); color: var(--fg); }
+.lp .nav-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.lp .nav-end .btn-pebble { display: flex; align-items: center; height: 40px; padding-inline: 20px; border-radius: 999px; font-size: 0.9375rem; font-weight: 600; color: var(--on-accent); white-space: nowrap; background: var(--accent); box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.35), 0 8px 16px -6px rgba(0,0,0,0.95), 0 2px 4px rgba(0,0,0,0.5); transition: filter .15s; }
+.lp .nav-end .btn-pebble:hover { filter: brightness(1.08); }
 @media (max-width: 760px) {
 .lp .nav-links { display: none; }
 }
@@ -127,8 +148,8 @@
 .lp .pf .kb { border: 1px solid var(--line); background: var(--surface-2); border-radius: 4px; padding: 2px 6px; font: 400 12.5px var(--mono); color: var(--muted); }
 /* App top bar and capsule nav */
 .lp .tb { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--ink-0) 85%, transparent); }
-.lp .tb .lg { display: flex; align-items: center; gap: 8px; font: 600 16px var(--app); letter-spacing: -0.01em; }
-.lp .tb .lm { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent); background: color-mix(in oklab, var(--accent) 15%, transparent); }
+.lp .tb .lg { display: flex; align-items: center; }
+.lp .tb .lg .wordmark { height: 24px; }
 .lp .tb .vr { width: 1px; height: 16px; background: var(--line); }
 .lp .tb .rp { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font: 400 14.5px var(--mono); }
 .lp .tb .rp .ic { color: var(--muted); font-size: 14px; }
@@ -394,7 +415,7 @@
 .lp .hot-edge { stroke-dasharray: 800; animation: lp-draw 1.2s cubic-bezier(.3,.7,.2,1) .5s backwards; }
 @keyframes lp-draw { from { stroke-dashoffset: 800; } }
 
-.lp [id] { scroll-margin-top: 72px; }
+.lp [id] { scroll-margin-top: 88px; }
 .lp { min-height: 100vh; }
 
 /* Closing: the real "Analyzing repository" screen beside one call to action */

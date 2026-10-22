@@ -536,30 +536,18 @@ const RAIL: Array<Array<{ icon: LucideIcon; active?: boolean; dot?: boolean }>> 
   [{ icon: FolderGit2 }, { icon: UserCog }],
 ];
 
-function BrandMark({ size }: { size: number }) {
-  return (
-    <svg viewBox="0 0 16 16" width={size} height={size}>
-      <path
-        d="M3 11.5 8 3l5 8.5"
-        fill="none"
-        stroke="oklch(0.762 0.163 46)"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="8" cy="12.4" r="1.4" fill="oklch(0.648 0.192 41)" />
-    </svg>
-  );
-}
-
 export function ArchitectureScreen() {
   return (
     <>
       <div className="tb">
         <span className="lg">
-          <span className="lm">
-            <BrandMark size={14} />
-          </span>
-          CodeLens AI
+          <img
+            src="/codelens-wordmark-on-dark.svg"
+            alt="CodeLens AI"
+            width={140}
+            height={24}
+            className="wordmark"
+          />
         </span>
         <span className="vr" />
         <span className="rp">
