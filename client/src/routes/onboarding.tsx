@@ -20,7 +20,6 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-import { PRODUCT } from "@/lib/repo-data";
 import { Dot, Ring, StatCell, Tag, type Tone } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 import { getAccessToken, isAuthenticated } from "@/lib/auth";
@@ -302,19 +301,13 @@ function Onboarding() {
       <div className="absolute inset-0 grid-field opacity-40" />
       <header className="relative flex h-12 items-center gap-3 border-b border-border px-4">
         <Link to="/" className="flex items-center gap-2">
-          <span className="grid size-6 place-items-center rounded-[5px] border border-violet/40 bg-violet/15">
-            <svg viewBox="0 0 16 16" className="size-3.5">
-              <path
-                d="M3 11.5 8 3l5 8.5"
-                fill="none"
-                stroke="var(--violet-soft)"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-              <circle cx="8" cy="12.4" r="1.4" fill="var(--magenta)" />
-            </svg>
-          </span>
-          <span className="text-[13.5px] font-semibold tracking-tight">{PRODUCT.name}</span>
+          <img
+            src="/codelens-wordmark-on-dark.svg"
+            alt="CodeLens AI"
+            width={140}
+            height={24}
+            className="h-[24px] w-auto"
+          />
         </Link>
         <div className="mx-auto hidden md:block">
           <Progress step={step} />
@@ -334,8 +327,8 @@ function Onboarding() {
               Let&apos;s understand your first codebase.
             </h1>
             <p className="mx-auto mt-3 max-w-lg text-[13.5px] leading-relaxed text-muted-foreground">
-              CodeLens AI reads a repository once, builds an architecture graph, an API surface and a
-              debt model, then keeps them current as your team commits.
+              CodeLens AI reads a repository once, builds an architecture graph, an API surface and
+              a debt model, then keeps them current as your team commits.
             </p>
             <div className="mt-7 grid gap-2 text-left sm:grid-cols-3">
               {[

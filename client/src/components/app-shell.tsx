@@ -25,7 +25,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
-import { PRODUCT } from "@/lib/repo-data";
 import { setActiveRepositoryId, useActiveRepositoryId } from "@/lib/active-repo";
 import { useMe } from "@/lib/queries/auth";
 import { useRepositories } from "@/lib/queries/repos";
@@ -87,20 +86,13 @@ const nav: Array<{ section: string; items: NavItem[] }> = [
 function Logo() {
   return (
     <Link to="/" className="focus-ring flex items-center gap-2 rounded-sm">
-      <span className="relative grid size-6 place-items-center rounded-[5px] border border-violet/40 bg-violet/15">
-        <span className="absolute inset-0 rounded-[5px] bg-violet/25 blur-[6px]" />
-        <svg viewBox="0 0 16 16" className="relative size-3.5">
-          <path
-            d="M3 11.5 8 3l5 8.5"
-            fill="none"
-            stroke="var(--violet-soft)"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-          <circle cx="8" cy="12.4" r="1.4" fill="var(--magenta)" />
-        </svg>
-      </span>
-      <span className="text-[13.5px] font-semibold tracking-tight">{PRODUCT.name}</span>
+      <img
+        src="/codelens-wordmark-on-dark.svg"
+        alt="CodeLens AI"
+        width={140}
+        height={24}
+        className="h-[24px] w-auto"
+      />
     </Link>
   );
 }

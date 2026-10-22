@@ -4,13 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { PRODUCT } from "@/lib/repo-data";
 import { useLogin } from "@/lib/queries/auth";
-import {
-  consumeOAuthState,
-  useGithubAuthorize,
-  useGithubExchange,
-} from "@/lib/queries/repos";
+import { consumeOAuthState, useGithubAuthorize, useGithubExchange } from "@/lib/queries/repos";
 import { ApiError } from "@/lib/api";
 
 // What `GET /auth/github/login/callback` appends when it sends the browser back
@@ -59,19 +54,13 @@ export function AuthFrame({
       <div className="relative w-full max-w-[392px]">
         <div className="mb-6 flex flex-col items-center text-center">
           <Link to="/" className="flex items-center gap-2">
-            <span className="grid size-7 place-items-center rounded-[6px] border border-violet/40 bg-violet/15">
-              <svg viewBox="0 0 16 16" className="size-4">
-                <path
-                  d="M3 11.5 8 3l5 8.5"
-                  fill="none"
-                  stroke="var(--violet-soft)"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <circle cx="8" cy="12.4" r="1.4" fill="var(--magenta)" />
-              </svg>
-            </span>
-            <span className="text-[15px] font-semibold tracking-tight">{PRODUCT.name}</span>
+            <img
+              src="/codelens-wordmark-on-dark.svg"
+              alt="CodeLens AI"
+              width={175}
+              height={30}
+              className="h-[30px] w-auto"
+            />
           </Link>
           <h1 className="mt-5 text-[20px] font-semibold tracking-tight">{title}</h1>
           <p className="mt-1.5 text-[13px] text-muted-foreground">{subtitle}</p>
@@ -151,7 +140,11 @@ export function GithubSignInButton({ label }: { label: string }) {
       disabled={authorize.isPending}
       className="focus-ring flex w-full items-center justify-center gap-2 rounded-md border border-border-strong bg-surface-2 px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3 disabled:opacity-60"
     >
-      {authorize.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Github className="size-4" />}
+      {authorize.isPending ? (
+        <Loader2 className="size-3.5 animate-spin" />
+      ) : (
+        <Github className="size-4" />
+      )}
       {label}
     </button>
   );
