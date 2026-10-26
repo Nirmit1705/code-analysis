@@ -92,8 +92,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      // Plus Jakarta Sans (UI) + JetBrains Mono (code, shas, numbers), from
-      // Google Fonts. `display=swap` shows text immediately in the fallback
+      // Plus Jakarta Sans (UI) + JetBrains Mono (code, shas, numbers) + Bricolage
+      // Grotesque (sign-in, sign-up and setup screens only), from Google Fonts. `display=swap` shows text immediately in the fallback
       // and swaps once loaded. Must match `--font-sans`/`--font-mono` in
       // `styles.css` — those names were referenced there before but never
       // actually loaded, so the app was silently rendering in a system font.
@@ -101,7 +101,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap",
       },
       { rel: "icon", href: "/codelens-favicon.svg", type: "image/svg+xml" },
     ],

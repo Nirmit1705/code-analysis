@@ -1,11 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import { AuthFrame, Field, GithubSignInButton } from "./login";
+import { AuthFrame, Field, GithubSignInButton } from "@/components/auth/auth-frame";
+import { AuthDivider, buttonPrimary, buttonSize } from "@/components/auth/auth-ui";
 import { useRegister } from "@/lib/queries/auth";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/signup")({
   head: () => ({
@@ -50,29 +52,29 @@ function SignUp() {
 
   return (
     <AuthFrame
-      title="Create your workspace"
-      subtitle="Connect a repository and understand it in minutes"
+      title="Create your account"
+      subtitle="Connect a repository and understand it in minutes."
+      headline="Understand a new codebase in minutes."
+      tagline="Connect a repository. CodeLens AI reads it once, then keeps the map current as your team commits."
       footer={
         <>
           Already have an account?{" "}
-          <Link to="/login" className="text-violet-soft hover:underline">
+          <Link
+            to="/login"
+            className="focus-ring rounded-sm font-medium text-violet-soft hover:underline"
+          >
             Sign in
           </Link>
         </>
       }
     >
       <GithubSignInButton label="Sign up with GitHub" />
-      <p className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10.5px] text-subtle">
-        <ShieldCheck className="size-3 text-success" /> Read-only access · no code stored
-      </p>
 
-      <div className="my-5 flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="label-xs">or create account with email</span>
-        <span className="h-px flex-1 bg-border" />
+      <div className="my-6">
+        <AuthDivider>or create an account with email</AuthDivider>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} className="space-y-[18px]">
         <Field
           label="Work email"
           type="email"
@@ -86,7 +88,8 @@ function SignUp() {
         <Field
           label="Password"
           type="password"
-          placeholder="min. 8 characters"
+          placeholder="Choose a password"
+          help="Use at least 8 characters."
           value={password}
           onChange={setPassword}
           name="password"
@@ -96,15 +99,9 @@ function SignUp() {
         <button
           type="submit"
           disabled={register.isPending}
-          className="focus-ring flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong bg-surface-2 px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3 disabled:opacity-60"
+          className={cn(buttonPrimary, buttonSize, "mt-1.5 w-full")}
         >
-          {register.isPending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <>
-              Create account <ArrowRight className="size-3.5" />
-            </>
-          )}
+          {register.isPending ? <Loader2 className="size-4 animate-spin" /> : "Create account"}
         </button>
       </form>
     </AuthFrame>

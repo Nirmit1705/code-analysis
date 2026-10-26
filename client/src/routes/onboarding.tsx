@@ -1,26 +1,30 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
-  Github,
-  ArrowRight,
-  Search,
-  Lock,
-  Globe,
-  GitBranch,
-  Check,
-  Circle,
-  Loader2,
-  ShieldCheck,
-  Eye,
-  FileCode2,
-  Sparkles,
   AlertCircle,
+  Check,
+  Github,
+  Globe,
+  Loader2,
+  Lock,
+  Search,
+  ShieldCheck,
 } from "lucide-react";
 
-import { Dot, Ring, StatCell, Tag, type Tone } from "@/components/ui-kit";
+import {
+  buttonGhost,
+  buttonPrimary,
+  buttonSecondary,
+  buttonSize,
+  buttonSizeLg,
+  inputClass,
+} from "@/components/auth/auth-ui";
+import { LensProgress } from "@/components/onboarding/lens-progress";
+import { OnboardingShell } from "@/components/onboarding/onboarding-shell";
+import type { Tone } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 import { getAccessToken, isAuthenticated } from "@/lib/auth";
 import { setActiveRepositoryId } from "@/lib/active-repo";
@@ -99,7 +103,12 @@ function formatPushedAt(pushedAt: string | null): string {
   }
 }
 
-const steps = ["Welcome", "GitHub", "Repository", "Branch", "Analysis", "Complete"];
+// Step indexes, in the order the rail in `OnboardingShell` lists them.
+const STEP_CONNECT = 0;
+const STEP_REPOSITORY = 1;
+const STEP_BRANCH = 2;
+const STEP_ANALYSIS = 3;
+const STEP_READY = 4;
 
 // Human-readable phrasing of each real `AnalysisRunStatus` value the
 // checklist below renders — the label text is invented, but the set and
@@ -114,6 +123,27 @@ const STAGE_LABELS: Record<(typeof ANALYSIS_RUN_STAGES)[number], string> = {
   generating_insights: "Running technical debt analysis",
 };
 
+// GitHub's own language colours — data, not theme tokens.
+const LANGUAGE_COLORS: Record<string, string> = {
+  TypeScript: "#3178c6",
+  JavaScript: "#f1e05a",
+  Python: "#3572a5",
+  Go: "#00add8",
+  Java: "#b07219",
+  Kotlin: "#a97bff",
+  Rust: "#dea584",
+  Ruby: "#701516",
+  PHP: "#4f5d95",
+  "C#": "#178600",
+  "C++": "#f34b7d",
+  C: "#555555",
+  Swift: "#f05138",
+  HCL: "#844fba",
+  Shell: "#89e051",
+  HTML: "#e34c26",
+  CSS: "#563d7c",
+};
+
 // Simple MVP tiering directly over the raw `debt_score` sum, distinct from
 // (and cruder than) the real Technical-Debt health formula Phase 6.3/6.4
 // compute from it — this screen only needs a rough tier, not the finished
@@ -124,40 +154,89 @@ function debtTier(score: number): { label: string; tone: Tone } {
   return { label: "High debt", tone: "danger" };
 }
 
-function Progress({ step }: { step: number }) {
+const DEBT_PILL: Partial<Record<Tone, string>> = {
+  success: "bg-success/12 text-success",
+  warning: "bg-warning/12 text-warning",
+  danger: "bg-danger/12 text-danger",
+};
+
+function StepHeading({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      {steps.map((s, i) => (
-        <div key={s} className="flex items-center gap-2">
-          <span
-            className={cn(
-              "flex items-center gap-1.5 text-[11.5px]",
-              i === step ? "text-foreground" : i < step ? "text-muted-foreground" : "text-subtle",
-            )}
-          >
-            <span
-              className={cn(
-                "grid size-4 place-items-center rounded-full border font-mono text-[9px]",
-                i < step
-                  ? "border-success/40 bg-success/15 text-success"
-                  : i === step
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-subtle",
-              )}
-            >
-              {i < step ? <Check className="size-2.5" /> : i + 1}
-            </span>
-            <span className="hidden sm:inline">{s}</span>
-          </span>
-          {i < steps.length - 1 ? <span className="h-px w-4 bg-border" /> : null}
+    <>
+      <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[40px]">
+        {title}
+      </h1>
+      {children ? (
+        <p className="mt-3.5 max-w-[580px] text-[14.5px] leading-normal text-muted-foreground">
+          {children}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** A selectable list row's radio mark. The dot scales in when chosen. */
+function RadioDot({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={cn(
+        "grid size-[18px] shrink-0 place-items-center rounded-full border-[1.5px] transition-colors duration-150 motion-reduce:transition-none",
+        checked ? "border-primary" : "border-border-strong",
+      )}
+    >
+      <span
+        className={cn(
+          "size-2 rounded-full bg-primary transition-transform duration-150 motion-reduce:transition-none",
+          checked ? "scale-100" : "scale-0",
+        )}
+      />
+    </span>
+  );
+}
+
+const rowBase =
+  "w-full border-t border-border text-left transition-colors duration-150 first:border-t-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 motion-reduce:transition-none";
+
+function rowTone(selected: boolean) {
+  return selected ? "bg-primary/[0.09]" : "hover:bg-surface-2";
+}
+
+function ListSkeleton({ rows }: { rows: number }) {
+  return (
+    <div className="divide-y divide-border" aria-hidden="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex animate-pulse items-center gap-4 px-6 py-[18px]">
+          <span className="size-[18px] rounded-full bg-surface-3" />
+          <div className="flex-1 space-y-2.5">
+            <span className="block h-3.5 w-48 rounded bg-surface-3" />
+            <span className="block h-3 w-28 rounded bg-surface-2" />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
+function ErrorNote({ children, onRetry }: { children: ReactNode; onRetry?: () => void }) {
+  return (
+    <div className="flex items-start gap-3 px-6 py-5 text-[12px] text-danger">
+      <AlertCircle className="mt-0.5 size-4 shrink-0" />
+      <span className="flex-1">{children}</span>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="focus-ring rounded-sm font-medium underline-offset-2 hover:underline"
+        >
+          Try again
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function Onboarding() {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(STEP_CONNECT);
   const [query, setQuery] = useState("");
   const [onlyPrivate, setOnlyPrivate] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepoSummary | null>(null);
@@ -173,15 +252,15 @@ function Onboarding() {
   const githubExchange = useGithubExchange();
   // Strict Mode runs effects twice in dev; a returning OAuth state is single-use.
   const handledExchange = useRef<string | null>(null);
-  // Also probed while on step 1 (not just step 2): GitHub only round-trips
-  // through our callback on the *first* authorization of an installation —
-  // revisiting "Authorize GitHub" once already installed just lands the user
-  // on GitHub's own "manage access" page with no redirect back to us. This
-  // succeeding is how step 1 detects an already-connected account and skips
-  // straight to repo selection instead of demanding a callback that will
-  // never come. A 400 here just means "not connected yet" — the ordinary
-  // starting state — not a real error, so it's never surfaced as one.
-  const githubRepos = useGithubRepos(step === 1 || step === 2);
+  // Also probed while on the connect step (not just the repository step): GitHub
+  // only round-trips through our callback on the *first* authorization of an
+  // installation — revisiting "Connect GitHub" once already installed just lands
+  // the user on GitHub's own "manage access" page with no redirect back to us.
+  // This succeeding is how the connect step detects an already-connected account
+  // and offers to continue straight to repo selection instead of demanding a
+  // callback that will never come. A 400 here just means "not connected yet" —
+  // the ordinary starting state — not a real error, so it's never surfaced as one.
+  const githubRepos = useGithubRepos(step === STEP_CONNECT || step === STEP_REPOSITORY);
   const repoBranches = useRepoBranches(repository?.id ?? null);
   const selectRepo = useSelectRepo();
   const selectBranch = useSelectBranch(repository?.id ?? null);
@@ -213,7 +292,7 @@ function Onboarding() {
             return;
           }
           toast.success("GitHub connected");
-          setStep(2);
+          setStep(STEP_REPOSITORY);
         },
         onError: () => {
           toast.error("Couldn't complete the GitHub connection — please try again.");
@@ -264,7 +343,7 @@ function Onboarding() {
         // real `Repository.id` exists to anchor it to (Phase 6.1).
         setActiveRepositoryId(repo.id);
         setSelectedBranchName(null);
-        setStep(3);
+        setStep(STEP_BRANCH);
       },
       onError: () => toast.error("Couldn't save the selected repository — please try again."),
     });
@@ -275,7 +354,7 @@ function Onboarding() {
     selectBranch.mutate(selectedBranchName, {
       onSuccess: (branch) => {
         setConfirmedBranch(branch);
-        setStep(4);
+        setStep(STEP_ANALYSIS);
       },
       onError: () => toast.error("Couldn't select that branch — please try again."),
     });
@@ -295,358 +374,422 @@ function Onboarding() {
   const filtered = repos.filter(
     (r) => r.full_name.toLowerCase().includes(query.toLowerCase()) && (!onlyPrivate || r.private),
   );
+  const connectPending = githubAuthorize.isPending || githubInstall.isPending;
 
   return (
-    <div className="relative min-h-screen overflow-hidden ambient-app">
-      <div className="absolute inset-0 grid-field opacity-40" />
-      <header className="relative flex h-12 items-center gap-3 border-b border-border px-4">
-        <Link to="/" className="flex items-center gap-2">
-          <img
-            src="/codelens-wordmark-on-dark.svg"
-            alt="CodeLens AI"
-            width={140}
-            height={24}
-            className="h-[24px] w-auto"
-          />
-        </Link>
-        <div className="mx-auto hidden md:block">
-          <Progress step={step} />
-        </div>
-        <Link to="/app" className="ml-auto text-[12px] text-subtle hover:text-foreground">
-          Skip setup
-        </Link>
-      </header>
+    <OnboardingShell step={step}>
+      <div className="max-w-[820px]">
+        {step === STEP_CONNECT ? (
+          <>
+            <StepHeading title="Connect GitHub">
+              CodeLens AI reads your code through a GitHub App. You choose which repositories it can
+              see.
+            </StepHeading>
 
-      <div className="relative mx-auto max-w-[860px] px-5 py-12">
-        {step === 0 ? (
-          <div className="panel ambient-panel p-8 text-center">
-            <span className="mx-auto grid size-11 place-items-center rounded-lg border border-violet/35 bg-violet/12">
-              <Sparkles className="size-5 text-violet-soft" />
-            </span>
-            <h1 className="mt-5 text-[26px] font-semibold tracking-tight">
-              Let&apos;s understand your first codebase.
-            </h1>
-            <p className="mx-auto mt-3 max-w-lg text-[13.5px] leading-relaxed text-muted-foreground">
-              CodeLens AI reads a repository once, builds an architecture graph, an API surface and
-              a debt model, then keeps them current as your team commits.
-            </p>
-            <div className="mt-7 grid gap-2 text-left sm:grid-cols-3">
-              {[
-                { icon: Eye, t: "Read-only", d: "We never write to your repository." },
-                { icon: FileCode2, t: "No code stored", d: "Only derived indexes and embeddings." },
-                { icon: ShieldCheck, t: "Revoke anytime", d: "Access is scoped per repository." },
-              ].map((c) => (
-                <div key={c.t} className="rounded-md border border-border bg-surface-2/50 p-3">
-                  <c.icon className="size-3.5 text-violet-soft" />
-                  <p className="mt-2 text-[12.5px] font-medium">{c.t}</p>
-                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">{c.d}</p>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => setStep(1)}
-              className="focus-ring mx-auto mt-7 flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2.5 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)]"
-            >
-              Get started <ArrowRight className="size-3.5" />
-            </button>
-          </div>
-        ) : null}
-
-        {step === 1 ? (
-          <div className="panel ambient-panel p-7">
-            <h1 className="text-[20px] font-semibold tracking-tight">Connect GitHub</h1>
-            <p className="mt-2 text-[13px] text-muted-foreground">
-              CodeLens AI requests the minimum scopes needed to read and analyze source.
-            </p>
-            <ul className="mt-5 divide-y divide-border rounded-md border border-border">
-              {[
-                { scope: "repo:read", why: "Clone source and read file contents for indexing." },
-                { scope: "metadata:read", why: "List repositories, branches and commit history." },
-                {
-                  scope: "webhook:write",
-                  why: "Re-analyze automatically when a branch receives commits.",
-                },
-              ].map((s) => (
-                <li key={s.scope} className="flex items-start gap-3 px-4 py-3">
-                  <Tag tone="violet" mono>
-                    {s.scope}
-                  </Tag>
-                  <p className="text-[12.5px] text-muted-foreground">{s.why}</p>
-                </li>
-              ))}
-            </ul>
-            {githubRepos.isSuccess ? (
-              <div className="mt-5 flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-[12.5px] text-success">
-                  <Check className="size-3.5" /> GitHub already connected
+            <div className="mt-10 rounded-2xl border border-border bg-surface">
+              <div className="flex flex-wrap items-center gap-4 px-6 py-6 sm:px-7">
+                <span className="grid size-12 shrink-0 place-items-center rounded-xl border border-border-strong bg-surface-2">
+                  <Github className="size-[26px]" />
                 </span>
-                <button
-                  onClick={() => setStep(2)}
-                  className="focus-ring ml-auto flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2.5 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)]"
-                >
-                  Continue <ArrowRight className="size-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="mt-5 flex items-center gap-2">
-                <button
-                  onClick={handleAuthorizeGithub}
-                  disabled={githubAuthorize.isPending || githubInstall.isPending}
-                  className="focus-ring flex items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-4 py-2.5 text-[13px] font-medium hover:bg-surface-3 disabled:opacity-60"
-                >
-                  {githubAuthorize.isPending || githubInstall.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Github className="size-4" />
-                  )}
-                  Authorize GitHub
-                </button>
-                <span className="font-mono text-[11px] text-subtle">
-                  opens github.com in this tab · you'll come back here automatically
-                </span>
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {step === 2 ? (
-          <div className="panel p-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-[17px] font-semibold tracking-tight">Select a repository</h1>
-              <div className="ml-auto flex items-center gap-2">
-                <div className="flex items-center gap-2 rounded-md border border-input bg-background px-2 py-1.5">
-                  <Search className="size-3.5 text-subtle" />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Filter repositories"
-                    className="w-44 bg-transparent font-mono text-[12px] outline-none placeholder:text-subtle"
-                  />
+                <div className="min-w-0 flex-1 basis-56">
+                  <div className="text-[15px] font-semibold">GitHub</div>
+                  <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+                    {githubRepos.isSuccess
+                      ? "Connected to this account."
+                      : "Opens github.com in this tab. You'll come straight back here."}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setOnlyPrivate((v) => !v)}
-                  className={cn(
-                    "focus-ring rounded-md border px-2.5 py-1.5 text-[12px]",
-                    onlyPrivate
-                      ? "border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] "
-                      : "border-border text-muted-foreground hover:border-border-strong",
-                  )}
-                >
-                  Private only
-                </button>
-              </div>
-            </div>
-
-            {githubRepos.isLoading ? (
-              <div className="mt-6 flex items-center justify-center gap-2 py-10 text-[13px] text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Loading repositories from GitHub…
-              </div>
-            ) : githubRepos.isError ? (
-              <div className="mt-6 flex items-center gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-3 text-[12.5px] text-danger">
-                <AlertCircle className="size-4 shrink-0" />
-                Couldn't load repositories. Make sure the GitHub App is installed, then retry.
-              </div>
-            ) : (
-              <ul className="mt-4 space-y-1.5">
-                {filtered.map((r) => (
-                  <li key={r.github_repo_id}>
+                {githubRepos.isLoading ? (
+                  <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" /> Checking connection
+                  </span>
+                ) : githubRepos.isSuccess ? (
+                  <div className="flex items-center gap-4">
+                    <span className="flex items-center gap-1.5 text-[12px] text-success">
+                      <Check className="size-4" strokeWidth={3} /> Connected
+                    </span>
                     <button
+                      type="button"
+                      onClick={() => setStep(STEP_REPOSITORY)}
+                      className={cn(buttonPrimary, buttonSize)}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAuthorizeGithub}
+                    disabled={connectPending}
+                    className={cn(buttonPrimary, buttonSize)}
+                  >
+                    {connectPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Connect GitHub
+                  </button>
+                )}
+              </div>
+
+              <div className="border-t border-border px-6 pb-3 pt-2 sm:px-7">
+                <div className="pb-1.5 pt-3.5 text-[11.5px] font-medium text-muted-foreground">
+                  What you&apos;re allowing
+                </div>
+                {[
+                  {
+                    name: "Contents",
+                    access: "read-only",
+                    why: "Clone your code so we can build the architecture graph and the search index.",
+                  },
+                  {
+                    name: "Metadata",
+                    access: "read-only",
+                    why: "List your repositories, branches and commits.",
+                  },
+                  {
+                    name: "Push events",
+                    access: null,
+                    why: "Re-analyze automatically when your tracked branch gets new commits.",
+                  },
+                ].map((p) => (
+                  <div
+                    key={p.name}
+                    className="grid gap-1 border-t border-border py-3.5 sm:grid-cols-[170px_minmax(0,1fr)] sm:gap-5"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-mono text-[11px]">{p.name}</span>
+                      {p.access ? (
+                        <span className="text-[10px] text-success">{p.access}</span>
+                      ) : null}
+                    </div>
+                    <p className="text-[12.5px] leading-snug text-muted-foreground">{p.why}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <p className="mt-5 flex max-w-[600px] items-start gap-3 text-[12px] leading-normal text-muted-foreground">
+              <ShieldCheck className="mt-0.5 size-[18px] shrink-0 text-success" />
+              <span>
+                CodeLens AI never writes to your repositories and doesn&apos;t keep your source,
+                only the indexes it builds. You can revoke access any time in your GitHub settings.
+              </span>
+            </p>
+          </>
+        ) : null}
+
+        {step === STEP_REPOSITORY ? (
+          <>
+            <StepHeading title="Choose a repository">
+              Pick the repository you want to understand. CodeLens AI only sees the ones you gave it
+              access to.
+            </StepHeading>
+
+            <div className="mt-8 flex flex-wrap items-center gap-3.5">
+              <div className="relative w-full sm:w-[340px]">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-subtle" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter repositories"
+                  aria-label="Filter repositories"
+                  className={cn(inputClass, "h-[42px] pl-10 pr-3.5 text-[12.5px]")}
+                />
+              </div>
+              <div className="flex overflow-hidden rounded-xl border border-border-strong">
+                {[
+                  { label: "All", value: false },
+                  { label: "Private", value: true },
+                ].map((o) => (
+                  <button
+                    key={o.label}
+                    type="button"
+                    aria-pressed={onlyPrivate === o.value}
+                    onClick={() => setOnlyPrivate(o.value)}
+                    className={cn(
+                      "focus-ring h-[42px] px-4 text-[12px] transition-colors duration-150 motion-reduce:transition-none",
+                      o.value && "border-l border-border-strong",
+                      onlyPrivate === o.value
+                        ? "bg-surface-3 text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {githubRepos.isSuccess ? (
+                <span className="text-[11.5px] text-muted-foreground sm:ml-auto">
+                  {filtered.length} {filtered.length === 1 ? "repository" : "repositories"}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-4 max-h-[440px] overflow-y-auto rounded-2xl border border-border bg-surface">
+              {githubRepos.isLoading ? (
+                <ListSkeleton rows={5} />
+              ) : githubRepos.isError ? (
+                <ErrorNote onRetry={() => void githubRepos.refetch()}>
+                  Couldn&apos;t load repositories. Make sure the GitHub App is installed, then
+                  retry.
+                </ErrorNote>
+              ) : filtered.length === 0 ? (
+                <p className="px-6 py-10 text-center text-[12px] text-muted-foreground">
+                  No repositories match.
+                </p>
+              ) : (
+                filtered.map((r) => {
+                  const selected = selectedRepo?.github_repo_id === r.github_repo_id;
+                  const [owner, name] = r.full_name.split("/");
+                  return (
+                    <button
+                      key={r.github_repo_id}
+                      type="button"
+                      aria-pressed={selected}
                       onClick={() => setSelectedRepo(r)}
                       className={cn(
-                        "focus-ring flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors",
-                        selectedRepo?.github_repo_id === r.github_repo_id
-                          ? "border-violet/45 bg-violet/10"
-                          : "border-border hover:border-border-strong hover:bg-surface-2",
+                        rowBase,
+                        rowTone(selected),
+                        "grid min-h-[68px] grid-cols-[28px_minmax(0,1fr)] items-center px-6 py-3 sm:grid-cols-[28px_minmax(0,1fr)_84px_130px]",
                       )}
                     >
-                      {r.private ? (
-                        <Lock className="size-3.5 text-warning" />
-                      ) : (
-                        <Globe className="size-3.5 text-info" />
-                      )}
-                      <span className="font-mono text-[12.5px]">{r.full_name}</span>
-                      {r.language ? <Tag tone="neutral">{r.language}</Tag> : null}
-                      <span className="flex items-center gap-1 font-mono text-[11px] text-subtle">
-                        <GitBranch className="size-3" /> {r.default_branch}
+                      <RadioDot checked={selected} />
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-[12.5px]">
+                          <span className="text-muted-foreground">{owner}/</span>
+                          {name}
+                        </span>
+                        <span className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                          {r.language ? (
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                className="size-[9px] rounded-full"
+                                style={{
+                                  background: LANGUAGE_COLORS[r.language] ?? "var(--subtle)",
+                                }}
+                              />
+                              {r.language}
+                            </span>
+                          ) : null}
+                          <span className="font-mono text-[10px]">{r.default_branch}</span>
+                          <span className="flex items-center gap-1">
+                            {r.private ? <Lock className="size-3" /> : <Globe className="size-3" />}
+                            {r.private ? "Private" : "Public"}
+                          </span>
+                        </span>
                       </span>
-                      <span className="ml-auto font-mono text-[11px] text-subtle">
+                      <span className="hidden font-mono text-[10.5px] text-muted-foreground sm:block">
                         {formatSizeKb(r.size_kb)}
                       </span>
-                      <span className="w-24 text-right font-mono text-[11px] text-subtle">
+                      <span className="hidden text-right text-[11.5px] text-subtle sm:block">
                         {formatPushedAt(r.pushed_at)}
                       </span>
-                      {selectedRepo?.github_repo_id === r.github_repo_id ? (
-                        <Dot tone="violet" />
-                      ) : (
-                        <span className="size-1.5" />
-                      )}
                     </button>
-                  </li>
-                ))}
-                {filtered.length === 0 ? (
-                  <li className="rounded-md border border-border px-3 py-6 text-center text-[12.5px] text-muted-foreground">
-                    No repositories match.
-                  </li>
-                ) : null}
-              </ul>
-            )}
+                  );
+                })
+              )}
+            </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="mt-6 flex flex-wrap items-center gap-4">
+              <span className="min-w-0 truncate text-[12px] text-muted-foreground">
+                {selectedRepo ? (
+                  <>
+                    Selected{" "}
+                    <span className="font-mono text-[11.5px] text-foreground">
+                      {selectedRepo.full_name}
+                    </span>
+                  </>
+                ) : (
+                  "Select a repository to continue"
+                )}
+              </span>
               <button
+                type="button"
                 onClick={handleSelectRepoContinue}
                 disabled={!selectedRepo || selectRepo.isPending}
-                className="focus-ring flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)] disabled:opacity-60"
+                className={cn(buttonPrimary, buttonSize, "ml-auto")}
               >
-                {selectRepo.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Continue <ArrowRight className="size-3.5" />
+                {selectRepo.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                Continue
               </button>
             </div>
-          </div>
+          </>
         ) : null}
 
-        {step === 3 ? (
-          <div className="panel p-5">
-            <h1 className="text-[17px] font-semibold tracking-tight">Select a branch</h1>
-            <p className="mt-1.5 font-mono text-[12px] text-subtle">{repository?.full_name}</p>
+        {step === STEP_BRANCH ? (
+          <>
+            <StepHeading title="Which branch should we track?">
+              We analyze this branch now, then again whenever it gets new commits.
+            </StepHeading>
+            <p className="mt-4 font-mono text-[11.5px] text-muted-foreground">
+              {repository?.full_name}
+            </p>
 
-            {repoBranches.isLoading ? (
-              <div className="mt-6 flex items-center justify-center gap-2 py-10 text-[13px] text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Loading branches from GitHub…
-              </div>
-            ) : repoBranches.isError ? (
-              <div className="mt-6 flex items-center gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-3 text-[12.5px] text-danger">
-                <AlertCircle className="size-4 shrink-0" /> Couldn't load branches. Please retry.
-              </div>
-            ) : (
-              <ul className="mt-4 divide-y divide-border rounded-md border border-border">
-                {(repoBranches.data ?? []).map((b) => {
-                  const isChosen = selectedBranchName === b.name;
+            <div className="mt-5 max-h-[440px] overflow-y-auto rounded-2xl border border-border bg-surface">
+              {repoBranches.isLoading ? (
+                <ListSkeleton rows={4} />
+              ) : repoBranches.isError ? (
+                <ErrorNote onRetry={() => void repoBranches.refetch()}>
+                  Couldn&apos;t load branches. Please retry.
+                </ErrorNote>
+              ) : (
+                (repoBranches.data ?? []).map((b) => {
+                  const chosen = selectedBranchName === b.name;
                   return (
-                    <li key={b.id}>
-                      <button
-                        onClick={() => setSelectedBranchName(b.name)}
+                    <button
+                      key={b.id}
+                      type="button"
+                      aria-pressed={chosen}
+                      onClick={() => setSelectedBranchName(b.name)}
+                      className={cn(
+                        rowBase,
+                        rowTone(chosen),
+                        "grid min-h-[60px] grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-y-1 px-6 py-3 sm:grid-cols-[28px_220px_90px_minmax(0,1fr)]",
+                      )}
+                    >
+                      <RadioDot checked={chosen} />
+                      <span className="truncate font-mono text-[12.5px]">{b.name}</span>
+                      <span
                         className={cn(
-                          "flex w-full items-center gap-3 px-3 py-3 text-left transition-colors",
-                          isChosen ? "bg-violet/10" : "hover:bg-surface-2",
+                          "font-mono text-[11px] transition-colors duration-150 motion-reduce:transition-none",
+                          chosen ? "text-violet-soft" : "text-muted-foreground",
                         )}
                       >
-                        <GitBranch
-                          className={cn("size-3.5", isChosen ? "text-violet-soft" : "text-subtle")}
-                        />
-                        <span className="w-48 font-mono text-[12.5px]">{b.name}</span>
-                        <span className="font-mono text-[11.5px] text-violet-soft">
-                          {b.latest_commit_sha.slice(0, 7)}
-                        </span>
-                        <span className="flex flex-1 items-center gap-1.5">
-                          {/* is_default = GitHub's actual default branch; is_selected = the branch
-                              currently chosen to analyze (Phase 2.4 fix) — two independent facts. */}
-                          {b.is_default ? <Tag tone="info">default on GitHub</Tag> : null}
-                          {b.is_selected ? <Tag tone="violet">currently analyzed</Tag> : null}
-                        </span>
-                        {isChosen ? <Dot tone="violet" /> : <span className="size-1.5" />}
-                      </button>
-                    </li>
+                        {b.latest_commit_sha.slice(0, 7)}
+                      </span>
+                      {/* is_default = GitHub's actual default branch; is_selected = the branch
+                          currently chosen to analyze (Phase 2.4 fix) — two independent facts. */}
+                      <span className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-1 pl-7 sm:col-span-1 sm:pl-0">
+                        {b.is_default ? (
+                          <span className="text-[11px] text-muted-foreground">
+                            Default branch on GitHub
+                          </span>
+                        ) : null}
+                        {b.is_selected ? (
+                          <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] text-violet-soft">
+                            Currently analyzed
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
                   );
-                })}
-              </ul>
-            )}
+                })
+              )}
+            </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
+                type="button"
+                onClick={() => setStep(STEP_REPOSITORY)}
+                className={cn(buttonGhost, buttonSize, "-ml-5")}
+              >
+                Back
+              </button>
+              <span className="ml-auto text-[12px] text-muted-foreground">
+                {selectedBranchName ? (
+                  <>
+                    Tracking{" "}
+                    <span className="font-mono text-[11.5px] text-foreground">
+                      {selectedBranchName}
+                    </span>
+                  </>
+                ) : null}
+              </span>
+              <button
+                type="button"
                 onClick={handleSelectBranchContinue}
                 disabled={!selectedBranchName || selectBranch.isPending}
-                className="focus-ring flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)] disabled:opacity-60"
+                className={cn(buttonPrimary, buttonSize)}
               >
-                {selectBranch.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Start analysis <ArrowRight className="size-3.5" />
+                {selectBranch.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                Start analysis
               </button>
             </div>
-          </div>
+          </>
         ) : null}
 
-        {step === 4 && repository ? (
+        {step === STEP_ANALYSIS && repository ? (
           <AnalysisStep
             repositoryId={repository.id}
             onDone={(run) => {
               setCompletedRun(run);
-              setStep(5);
+              setStep(STEP_READY);
             }}
             branch={confirmedBranch?.name ?? selectedBranchName ?? ""}
             target={repository.full_name}
           />
-        ) : step === 4 ? (
-          <div className="panel ambient-panel p-7 text-center text-[13px] text-muted-foreground">
+        ) : step === STEP_ANALYSIS ? (
+          <div className="rounded-2xl border border-border bg-surface p-7 text-center text-[12.5px] text-muted-foreground">
             No repository selected — go back and pick one first.
           </div>
         ) : null}
 
-        {step === 5 ? (
-          <div className="panel ambient-panel p-7">
-            <span className="flex items-center gap-2 text-[12px] text-success">
-              <Dot tone="success" pulse /> Analysis complete
-            </span>
-            <h1 className="mt-3 text-[24px] font-semibold tracking-tight">
-              {repository?.name ?? "Your repository"} is now understandable.
+        {step === STEP_READY ? (
+          <>
+            <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[42px]">
+              {repository?.name ?? "Your repository"} is ready to explore.
             </h1>
-            <p className="mt-2 font-mono text-[12px] text-subtle">
-              {repository?.full_name} · {confirmedBranch?.name}
-              {confirmedBranch ? ` · ${confirmedBranch.latest_commit_sha.slice(0, 7)}` : ""}
+            <p className="mt-[18px] break-all font-mono text-[11.5px] text-muted-foreground">
+              {repository?.full_name}
+              {confirmedBranch ? (
+                <>
+                  {" on "}
+                  <span className="text-foreground">{confirmedBranch.name}</span>
+                  {" at "}
+                  <span className="text-violet-soft">
+                    {confirmedBranch.latest_commit_sha.slice(0, 7)}
+                  </span>
+                </>
+              ) : null}
             </p>
 
-            <div className="mt-6 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
-              <div className="bg-surface">
-                <StatCell
-                  label="Files analyzed"
-                  value={(completedRun?.file_count ?? 0).toLocaleString()}
-                />
-              </div>
-              <div className="bg-surface">
-                <StatCell
-                  label="Dependencies"
-                  value={(completedRun?.dependency_count ?? 0).toLocaleString()}
-                />
-              </div>
-              <div className="bg-surface">
-                <StatCell
-                  label="Modules detected"
-                  value={(completedRun?.module_count ?? 0).toLocaleString()}
-                />
-              </div>
-              <div className="bg-surface">
-                <StatCell
-                  label="APIs detected"
-                  value={(completedRun?.api_count ?? 0).toLocaleString()}
-                />
-              </div>
-            </div>
+            <dl className="mt-12 grid grid-cols-2 gap-px border-y border-border bg-border lg:grid-cols-4">
+              {[
+                { label: "Files analyzed", value: completedRun?.file_count },
+                { label: "Dependencies", value: completedRun?.dependency_count },
+                { label: "Modules detected", value: completedRun?.module_count },
+                { label: "APIs detected", value: completedRun?.api_count },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  className="flex flex-col-reverse bg-background py-7 pl-7 first:pl-0 max-lg:odd:pl-0"
+                >
+                  <dt className="mt-2.5 text-[12.5px] text-muted-foreground">{s.label}</dt>
+                  <dd className="text-[34px] font-semibold leading-none tracking-[-0.03em] sm:text-[48px]">
+                    {(s.value ?? 0).toLocaleString()}
+                  </dd>
+                </div>
+              ))}
+            </dl>
 
-            {/* Only a rough debt tier here, deliberately — the real
-                Architecture/Technical-Debt health-ring formulas don't exist
-                until Phase 6.3/6.4, which is when this panel's ring(s) get
-                finalized (see the Phase 6 plan's 6.2 section). */}
-            <div className="mt-3 flex items-center gap-3 rounded-lg border border-border bg-surface p-4">
-              <Tag tone={debtTier(completedRun?.debt_score ?? 0).tone}>
+            <div className="mt-7 flex flex-wrap items-center gap-4">
+              <span
+                className={cn(
+                  "flex h-[30px] items-center gap-2 rounded-lg px-3 text-[11.5px] font-medium",
+                  DEBT_PILL[debtTier(completedRun?.debt_score ?? 0).tone],
+                )}
+              >
+                <span className="size-2 rounded-full bg-current" />
                 {debtTier(completedRun?.debt_score ?? 0).label}
-              </Tag>
-              <div>
-                <p className="text-[13px] font-medium">Technical debt</p>
-                <p className="text-[11.5px] text-muted-foreground">
-                  Debt score {(completedRun?.debt_score ?? 0).toFixed(1)} · full health scoring
-                  lands with the Dashboard
-                </p>
-              </div>
+              </span>
+              <span className="text-[12.5px] text-muted-foreground">
+                Debt score{" "}
+                <span className="font-mono text-[11.5px] text-foreground">
+                  {(completedRun?.debt_score ?? 0).toFixed(1)}
+                </span>
+                . The full breakdown is under Technical Debt.
+              </span>
             </div>
 
             <button
+              type="button"
               onClick={() => navigate({ to: "/app" })}
-              className="focus-ring mt-6 flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2.5 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)]"
+              className={cn(buttonPrimary, buttonSizeLg, "mt-12")}
             >
-              Explore Project <ArrowRight className="size-3.5" />
+              Explore project
             </button>
-          </div>
+          </>
         ) : null}
       </div>
-    </div>
+    </OnboardingShell>
   );
 }
 
@@ -771,91 +914,91 @@ function AnalysisStep({
   const pct =
     outcome === "completed" ? 100 : Math.round((stageIndex / ANALYSIS_RUN_STAGES.length) * 100);
 
-  if (outcome === "failed") {
-    return (
-      <div className="panel ambient-panel p-7">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-[20px] font-semibold tracking-tight">Analysis failed</h1>
-            <p className="mt-1.5 font-mono text-[12px] text-subtle">
-              {target} · {branch}
-            </p>
-          </div>
-          <Ring value={pct} size={64} tone="danger" label="!" />
-        </div>
-
-        <div className="mt-6 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-3 text-[12.5px] text-danger">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{errorMessage ?? "The analysis run failed for an unknown reason."}</span>
-        </div>
-
-        <button
-          onClick={startAnalysis}
-          className="focus-ring mt-5 flex items-center gap-2 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-4 py-2.5 text-[13px] font-medium hover:bg-[oklch(0.745_0.19_44)]"
-        >
-          Retry analysis <ArrowRight className="size-3.5" />
-        </button>
-      </div>
-    );
-  }
+  const failed = outcome === "failed";
 
   return (
-    <div className="panel ambient-panel p-7">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[20px] font-semibold tracking-tight">Analyzing repository</h1>
-          <p className="mt-1.5 font-mono text-[12px] text-subtle">
-            {target} · {branch}
-          </p>
+    <>
+      <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[40px]">
+        {failed ? "Analysis failed" : "Analyzing repository"}
+      </h1>
+      <p className="mt-4 break-all font-mono text-[11.5px] text-muted-foreground">
+        {target} on <span className="text-foreground">{branch}</span>
+      </p>
+
+      <div className="mt-9 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface md:flex-row">
+        <div className="min-w-0 flex-1 px-5 pb-3 pt-5">
+          {failed ? (
+            <div className="flex items-start gap-3 rounded-xl bg-danger/10 px-4 py-4 text-[12.5px] text-danger">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span>{errorMessage ?? "The analysis run failed for an unknown reason."}</span>
+            </div>
+          ) : (
+            <ul>
+              {ANALYSIS_RUN_STAGES.map((stageKey, i) => {
+                const done = i < stageIndex || outcome === "completed";
+                const running = !done && i === stageIndex;
+                return (
+                  <li
+                    key={stageKey}
+                    className={cn(
+                      "flex h-12 items-center gap-3.5 rounded-[10px] px-3.5 transition-colors duration-300 motion-reduce:transition-none",
+                      running && "bg-primary/[0.09]",
+                    )}
+                  >
+                    <span className="grid size-[18px] place-items-center">
+                      {done ? (
+                        <Check
+                          strokeWidth={3}
+                          className="size-[18px] animate-in text-primary duration-200 zoom-in-50 motion-reduce:animate-none"
+                        />
+                      ) : running ? (
+                        <Loader2 className="size-[18px] animate-spin text-violet-soft motion-reduce:animate-none" />
+                      ) : (
+                        <span className="size-2.5 rounded-full border-[1.5px] border-border-strong" />
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[13.5px] transition-colors duration-300 motion-reduce:transition-none",
+                        done
+                          ? "text-muted-foreground"
+                          : running
+                            ? "font-semibold text-foreground"
+                            : "text-subtle",
+                      )}
+                    >
+                      {STAGE_LABELS[stageKey]}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-        <Ring value={pct} size={64} label={`${pct}%`} />
-      </div>
 
-      <div className="mt-6 h-1 overflow-hidden rounded-full bg-surface-3">
-        <div
-          className="h-full rounded-full bg-violet transition-[width] duration-700"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-
-      <ul className="mt-6 space-y-1">
-        {ANALYSIS_RUN_STAGES.map((stageKey, i) => {
-          const done = i < stageIndex || outcome === "completed";
-          const running = !done && i === stageIndex;
-          return (
-            <li
-              key={stageKey}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 transition-colors",
-                running && "bg-violet/[0.08]",
-              )}
+        <div className="flex shrink-0 flex-col items-center justify-center gap-5 border-t border-border p-7 md:w-[300px] md:border-l md:border-t-0">
+          <LensProgress
+            value={pct}
+            label={failed ? "!" : `${pct}%`}
+            caption={failed ? "Analysis failed" : STAGE_LABELS[progressStage]}
+            tone={failed ? "danger" : "primary"}
+          />
+          {failed ? (
+            <button
+              type="button"
+              onClick={startAnalysis}
+              className={cn(buttonSecondary, buttonSize)}
             >
-              {done ? (
-                <Check className="size-3.5 text-success" />
-              ) : running ? (
-                <Loader2 className="size-3.5 animate-spin text-violet-soft" />
-              ) : (
-                <Circle className="size-3.5 text-subtle" />
-              )}
-              <span
-                className={cn(
-                  "text-[13px]",
-                  done ? "text-muted-foreground" : running ? "text-foreground" : "text-subtle",
-                )}
-              >
-                {STAGE_LABELS[stageKey]}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="mt-6 flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3">
-        <span className="font-mono text-[11px] text-subtle">
-          {runId ? `Run ${runId.slice(0, 8)}` : "Starting…"}
-        </span>
-        <span className="font-mono text-[11px] text-subtle">Elapsed {elapsedSeconds}s</span>
+              Retry analysis
+            </button>
+          ) : null}
+        </div>
       </div>
-    </div>
+
+      <div className="mt-4 flex justify-between font-mono text-[10.5px] text-muted-foreground">
+        <span>{runId ? `Run ${runId.slice(0, 8)}` : "Starting…"}</span>
+        <span>Elapsed {elapsedSeconds}s</span>
+      </div>
+    </>
   );
 }

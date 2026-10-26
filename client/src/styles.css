@@ -19,6 +19,8 @@
   /* Both families are loaded from Google Fonts in `routes/__root.tsx`. */
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /* Sign-in, sign-up and setup only (`font-auth`); also loaded in `routes/__root.tsx`. */
+  --font-auth: "Bricolage Grotesque", var(--font-sans);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -271,6 +273,37 @@
   .seq-grow,
   .seq-fade,
   .seq-lit {
+    animation: none;
+  }
+}
+
+/* The sign-in / sign-up lens art plays one entrance: the ring sweeps in, the
+ * nodes fade (`seq-fade`), then the highlighted request path is traced hop by
+ * hop. Resting styles are the finished picture. `.trace-draw` paths need
+ * `pathLength="1"` so one dash covers the whole path; each sets --d. The origin
+ * is the lens centre in the art's 840x900 viewBox (see auth-lens.tsx). */
+@keyframes lens-sweep {
+  from {
+    opacity: 0;
+    transform: rotate(-50deg) scale(0.96);
+  }
+}
+@keyframes trace-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+.lens-sweep {
+  transform-origin: 420px 400px;
+  animation: lens-sweep 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.trace-draw {
+  stroke-dasharray: 1;
+  animation: trace-draw 0.6s ease-out var(--d, 0s) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lens-sweep,
+  .trace-draw {
     animation: none;
   }
 }

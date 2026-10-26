@@ -1,12 +1,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Github, ArrowRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { AuthFrame, Field, GithubSignInButton } from "@/components/auth/auth-frame";
+import { AuthDivider, buttonPrimary, buttonSize } from "@/components/auth/auth-ui";
 import { useLogin } from "@/lib/queries/auth";
-import { consumeOAuthState, useGithubAuthorize, useGithubExchange } from "@/lib/queries/repos";
+import { consumeOAuthState, useGithubExchange } from "@/lib/queries/repos";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 // What `GET /auth/github/login/callback` appends when it sends the browser back
 // after "Continue with GitHub". `z.coerce.string()` because the router
@@ -36,119 +39,6 @@ export const Route = createFileRoute("/login")({
   }),
   component: Login,
 });
-
-export function AuthFrame({
-  title,
-  subtitle,
-  children,
-  footer,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-  footer: React.ReactNode;
-}) {
-  return (
-    <div className="relative grid min-h-screen place-items-center overflow-hidden ambient-hero px-4">
-      <div className="absolute inset-0 grid-field opacity-50" />
-      <div className="relative w-full max-w-[392px]">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <Link to="/" className="flex items-center gap-2">
-            <img
-              src="/codelens-wordmark-on-dark.svg"
-              alt="CodeLens AI"
-              width={175}
-              height={30}
-              className="h-[30px] w-auto"
-            />
-          </Link>
-          <h1 className="mt-5 text-[20px] font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1.5 text-[13px] text-muted-foreground">{subtitle}</p>
-        </div>
-        <div className="panel ambient-panel p-5">{children}</div>
-        <p className="mt-4 text-center text-[12.5px] text-muted-foreground">{footer}</p>
-      </div>
-    </div>
-  );
-}
-
-export function Field({
-  label,
-  type,
-  placeholder,
-  hint,
-  value,
-  onChange,
-  name,
-  autoComplete,
-  required,
-}: {
-  label: string;
-  type: string;
-  placeholder: string;
-  hint?: React.ReactNode;
-  value?: string;
-  onChange?: (value: string) => void;
-  name?: string;
-  autoComplete?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 flex items-center justify-between text-[12px] text-muted-foreground">
-        {label}
-        {hint}
-      </span>
-      <input
-        type={type}
-        name={name}
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
-        autoComplete={autoComplete}
-        required={required}
-        className="focus-ring w-full rounded-md border border-input bg-background px-2.5 py-2 font-mono text-[12.5px] text-foreground placeholder:text-subtle"
-      />
-    </label>
-  );
-}
-
-/** "Continue with GitHub": asks the API where to send the browser, then goes
- * there. Shared by the sign-in and sign-up screens. */
-export function GithubSignInButton({ label }: { label: string }) {
-  const authorize = useGithubAuthorize("signin");
-
-  const handleClick = () => {
-    authorize.mutate(undefined, {
-      onSuccess: (data) => {
-        window.location.href = data.authorize_url;
-      },
-      onError: (err) => {
-        const message =
-          err instanceof ApiError && err.status === 503
-            ? "GitHub sign-in isn't configured on this server."
-            : "Couldn't start GitHub sign-in — please try again.";
-        toast.error(message);
-      },
-    });
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={authorize.isPending}
-      className="focus-ring flex w-full items-center justify-center gap-2 rounded-md border border-border-strong bg-surface-2 px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3 disabled:opacity-60"
-    >
-      {authorize.isPending ? (
-        <Loader2 className="size-3.5 animate-spin" />
-      ) : (
-        <Github className="size-4" />
-      )}
-      {label}
-    </button>
-  );
-}
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -204,26 +94,29 @@ function Login() {
 
   return (
     <AuthFrame
-      title="Sign in to CodeLens AI"
-      subtitle="Codebase intelligence for your repositories"
+      title="Welcome back"
+      subtitle="Sign in to see how your repositories fit together."
+      headline="Your repositories, mapped."
+      tagline="Architecture, dependencies and technical debt, kept current with every commit."
       footer={
         <>
-          Don&apos;t have an account?{" "}
-          <Link to="/signup" className="text-violet-soft hover:underline">
-            Create account
+          New to CodeLens AI?{" "}
+          <Link
+            to="/signup"
+            className="focus-ring rounded-sm font-medium text-violet-soft hover:underline"
+          >
+            Create an account
           </Link>
         </>
       }
     >
       <GithubSignInButton label="Continue with GitHub" />
 
-      <div className="my-5 flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="label-xs">or sign in with email</span>
-        <span className="h-px flex-1 bg-border" />
+      <div className="my-6">
+        <AuthDivider>or sign in with email</AuthDivider>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} className="space-y-[18px]">
         <Field
           label="Email"
           type="email"
@@ -237,30 +130,19 @@ function Login() {
         <Field
           label="Password"
           type="password"
-          placeholder="••••••••••"
+          placeholder="Your password"
           value={password}
           onChange={setPassword}
           name="password"
           autoComplete="current-password"
           required
-          hint={
-            <span className="cursor-pointer text-[11.5px] text-violet-soft hover:underline">
-              Forgot?
-            </span>
-          }
         />
         <button
           type="submit"
           disabled={login.isPending}
-          className="focus-ring flex w-full items-center justify-center gap-1.5 rounded-md border border-primary bg-primary text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-[oklch(0.745_0.19_44)] disabled:opacity-60"
+          className={cn(buttonPrimary, buttonSize, "mt-1.5 w-full")}
         >
-          {login.isPending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <>
-              Sign In <ArrowRight className="size-3.5" />
-            </>
-          )}
+          {login.isPending ? <Loader2 className="size-4 animate-spin" /> : "Sign in"}
         </button>
       </form>
     </AuthFrame>
