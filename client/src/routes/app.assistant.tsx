@@ -135,6 +135,10 @@ function renderAnswerBody(text: string): ReactNode[] {
   const blocks: ReactNode[] = [];
   let currentList: string[] = [];
   let ordered = false;
+  // The number the model wrote on a numbered list's first item. A list that is
+  // interrupted (a sub-bullet or paragraph between steps) is flushed and the
+  // next step opens a new <ol>, which would restart at 1 without this.
+  let listStart = 1;
 
   const flushList = () => {
     if (currentList.length === 0) return;
@@ -142,6 +146,7 @@ function renderAnswerBody(text: string): ReactNode[] {
     blocks.push(
       <List
         key={blocks.length}
+        {...(ordered && listStart > 1 ? { start: listStart } : {})}
         className={cn(
           "flex flex-col gap-2 pl-5 marker:text-violet",
           ordered ? "list-decimal" : "list-disc",
@@ -160,13 +165,14 @@ function renderAnswerBody(text: string): ReactNode[] {
     // `- item` / `* item` (bullets) and `1. item` / `1) item` (numbered steps,
     // which the model uses for walkthroughs) each become a real list.
     const bulletMatch = /^[-*]\s+(.+)/.exec(line.trim());
-    const numberMatch = /^\d+[.)]\s+(.+)/.exec(line.trim());
+    const numberMatch = /^(\d+)[.)]\s+(.+)/.exec(line.trim());
     const match = bulletMatch ?? numberMatch;
     if (match) {
       const isNumbered = bulletMatch === null;
       if (currentList.length > 0 && ordered !== isNumbered) flushList();
+      if (isNumbered && currentList.length === 0) listStart = Number(numberMatch![1]);
       ordered = isNumbered;
-      currentList.push(match[1]!);
+      currentList.push(isNumbered ? numberMatch![2]! : match[1]!);
       continue;
     }
     flushList();
