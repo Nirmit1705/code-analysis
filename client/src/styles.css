@@ -338,3 +338,156 @@
 .text-\[58px\] { font-size: 66px; }
 .text-xs { font-size: 13.5px; }
 .text-sm { font-size: 15px; }
+
+/* Impact Analysis map (components/impact/impact-map.tsx). Rings are hops from
+ * the commit. One radar sweep plays on load and reveals each point as the line
+ * passes it (--dl is that point's delay); everything else is static, and the
+ * resting styles are the finished picture, so reduced-motion users see it
+ * complete. Prefixed `im-` because a bare `.ring` collides with Tailwind's. */
+:root {
+  --impact-endpoint: oklch(0.78 0.1 235);
+}
+.im-bezel {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.im-tick {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.im-ring {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.im-ring-ep {
+  stroke: var(--subtle);
+  stroke-dasharray: 2 6;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+.im-ring-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--subtle);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 6px;
+  stroke-linejoin: round;
+}
+.im-spoke {
+  stroke: var(--violet);
+  stroke-opacity: 0.3;
+  stroke-width: 1;
+  animation: im-in 0.5s both;
+  animation-delay: var(--dl, 0s);
+}
+.im-sweep {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: im-sweep 1.6s cubic-bezier(0.35, 0.1, 0.5, 1) both;
+  pointer-events: none;
+}
+.im-pt {
+  cursor: pointer;
+  animation: im-in 0.45s both;
+  animation-delay: var(--dl, 0s);
+}
+.im-halo {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.5;
+  transition:
+    fill 0.15s,
+    stroke 0.15s;
+}
+.im-dot {
+  transition: transform 0.15s;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.im-file.im-r1 .im-dot {
+  fill: var(--violet-soft);
+}
+.im-file.im-r2 .im-dot {
+  fill: oklch(0.87 0.045 70);
+}
+.im-file.im-r3 .im-dot {
+  fill: var(--muted-foreground);
+}
+.im-file.im-r4 .im-dot {
+  fill: var(--subtle);
+}
+.im-test .im-dot {
+  fill: var(--surface);
+  stroke: var(--muted-foreground);
+  stroke-width: 1.6;
+}
+.im-test.im-r1 .im-dot {
+  stroke: var(--violet-soft);
+}
+.im-api .im-dot {
+  fill: var(--impact-endpoint);
+  stroke: var(--impact-endpoint);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.im-pt.is-hot .im-dot {
+  transform: scale(1.5);
+}
+.im-pt.is-hot .im-halo {
+  fill: oklch(0.703 0.198 42 / 0.16);
+  stroke: var(--violet);
+}
+.im-core {
+  fill: var(--violet);
+}
+.im-core-glow {
+  fill: oklch(0.703 0.198 42 / 0.16);
+}
+.im-core-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  fill: oklch(0.16 0.012 45);
+  text-anchor: middle;
+}
+.im-tip-bg {
+  fill: var(--surface-3);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.im-tip-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--foreground);
+}
+@keyframes im-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes im-sweep {
+  0% {
+    transform: rotate(0deg);
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(360deg);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .im-sweep {
+    display: none;
+  }
+  .im-pt,
+  .im-spoke {
+    animation: none;
+  }
+}
